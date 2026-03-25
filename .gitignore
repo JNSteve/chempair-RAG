@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+my_pdfs/
+parsed_output/
+rag_storage/
