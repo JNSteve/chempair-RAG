@@ -4,4 +4,4 @@ __pycache__/
 .venv/
 my_pdfs/
 parsed_output/
-rag_storage/
+rag_storage/kv_store_llm_response_cache.json

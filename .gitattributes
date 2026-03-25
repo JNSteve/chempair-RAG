@@ -1,0 +1,2 @@
+rag_storage/*.json filter=lfs diff=lfs merge=lfs -text
+rag_storage/*.graphml filter=lfs diff=lfs merge=lfs -text
