@@ -24,7 +24,7 @@ from raganything import RAGAnything, RAGAnythingConfig
 load_dotenv()
 
 # ---- Configuration ----
-RAG_STORAGE = "./rag_storage"
+RAG_STORAGE = os.environ.get("RAG_STORAGE", "./rag_storage")
 LLM_MODEL = "gpt-5.4-mini"
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
