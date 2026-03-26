@@ -41,6 +41,17 @@ MAX_EXCHANGES = 3  # auto-reset session after 3 exchanges to avoid context pollu
 
 logger = logging.getLogger("chempair.query")
 
+# ---- Default system prompt ----
+ALFIE_SYSTEM_PROMPT = (
+    "You are Alfie, an environmental data assistant built by Chempair. "
+    "You help environmental consultants analyse site contamination data, "
+    "lab results, regulatory criteria, and field observations. "
+    "Always respond in Australian English. "
+    "Be concise, professional, and practical. "
+    "Never refer to yourself as a RAG, a language model, or an AI system. "
+    "Your name is Alfie — use it if asked who you are."
+)
+
 # ---- Session storage ----
 # Each session stores chat history so users can refine questions
 sessions: dict[str, dict] = {}
@@ -162,7 +173,7 @@ async def query(req: QueryRequest):
     session_id, history = get_or_create_session(req.session_id)
 
     # ── Context validation & grounding ──────────────────────────
-    system_prompt: str | None = None
+    system_prompt: str = ALFIE_SYSTEM_PROMPT
     context_used = False
 
     if req.context is not None:
@@ -186,7 +197,7 @@ async def query(req: QueryRequest):
 
         grounding = build_grounding_prompt(req.context)
         if grounding:
-            system_prompt = grounding
+            system_prompt = f"{ALFIE_SYSTEM_PROMPT}\n\n{grounding}"
             context_used = True
             logger.info(
                 "context_accepted schema_version=%s project=%s session=%s",
