@@ -4,6 +4,8 @@ Your Chempair app calls this API to get answers from the ingested regulatory doc
 Supports conversational sessions so users can refine their questions.
 """
 
+import json
+import logging
 import os
 import uuid
 import time
@@ -11,10 +13,16 @@ import numpy as np
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sentence_transformers import SentenceTransformer
+
+from context_models import (
+    WorkspaceContext,
+    build_grounding_prompt,
+    MAX_CONTEXT_PAYLOAD_BYTES,
+)
 
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
@@ -30,6 +38,8 @@ EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 SESSION_TTL = 3600  # sessions expire after 1 hour of inactivity
 MAX_EXCHANGES = 3  # auto-reset session after 3 exchanges to avoid context pollution
+
+logger = logging.getLogger("chempair.query")
 
 # ---- Session storage ----
 # Each session stores chat history so users can refine questions
@@ -132,6 +142,7 @@ class QueryRequest(BaseModel):
     question: str
     mode: str = "hybrid"  # local, global, hybrid, naive, mix
     session_id: str | None = None  # pass to continue a conversation
+    context: WorkspaceContext | None = None  # optional structured workspace context
 
 
 class QueryResponse(BaseModel):
@@ -139,6 +150,7 @@ class QueryResponse(BaseModel):
     mode: str
     session_id: str  # return to client so they can continue the conversation
     session_reset: bool = False  # true when session hit max exchanges and was cleared
+    context_used: bool = False  # true when structured workspace context was applied
 
 
 @app.post("/query", response_model=QueryResponse)
@@ -148,6 +160,47 @@ async def query(req: QueryRequest):
 
     cleanup_sessions()
     session_id, history = get_or_create_session(req.session_id)
+
+    # ── Context validation & grounding ──────────────────────────
+    system_prompt: str | None = None
+    context_used = False
+
+    if req.context is not None:
+        # Size guardrail: reject oversized context payloads
+        try:
+            context_bytes = len(req.context.model_dump_json().encode("utf-8"))
+        except Exception:
+            context_bytes = 0
+
+        if context_bytes > MAX_CONTEXT_PAYLOAD_BYTES:
+            logger.warning(
+                "context_rejected reason=oversize size_bytes=%d limit=%d session=%s",
+                context_bytes,
+                MAX_CONTEXT_PAYLOAD_BYTES,
+                session_id,
+            )
+            raise HTTPException(
+                status_code=422,
+                detail=f"context payload too large ({context_bytes} bytes, limit {MAX_CONTEXT_PAYLOAD_BYTES})",
+            )
+
+        grounding = build_grounding_prompt(req.context)
+        if grounding:
+            system_prompt = grounding
+            context_used = True
+            logger.info(
+                "context_accepted schema_version=%s project=%s session=%s",
+                req.context.schemaVersion,
+                req.context.project.projectName if req.context.project else None,
+                session_id,
+            )
+        else:
+            logger.info(
+                "context_present_but_empty session=%s",
+                session_id,
+            )
+    else:
+        logger.info("context_absent session=%s", session_id)
 
     try:
         # Build a contextual query using chat history
@@ -165,7 +218,11 @@ async def query(req: QueryRequest):
         else:
             enhanced_query = req.question
 
-        result = await rag.aquery(enhanced_query, mode=req.mode)
+        result = await rag.aquery(
+            enhanced_query,
+            mode=req.mode,
+            system_prompt=system_prompt,
+        )
 
         # Store in session history
         history.append({"role": "user", "content": req.question})
@@ -182,6 +239,7 @@ async def query(req: QueryRequest):
             mode=req.mode,
             session_id=session_id,
             session_reset=session_reset,
+            context_used=context_used,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
