@@ -24,6 +24,7 @@ from context_models import (
     MAX_CONTEXT_PAYLOAD_BYTES,
 )
 
+from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
 
@@ -179,7 +180,9 @@ async def query(req: QueryRequest):
     session_id, history = get_or_create_session(req.session_id)
 
     # ── Context validation & grounding ──────────────────────────
-    system_prompt: str = ALFIE_SYSTEM_PROMPT
+    # Alfie identity goes into user_prompt (LightRAG's "Additional Instructions" slot)
+    # so we do NOT replace LightRAG's built-in rag_response system prompt.
+    user_prompt_parts: list[str] = [ALFIE_SYSTEM_PROMPT]
     context_used = False
 
     if req.context is not None:
@@ -203,7 +206,7 @@ async def query(req: QueryRequest):
 
         grounding = build_grounding_prompt(req.context)
         if grounding:
-            system_prompt = f"{ALFIE_SYSTEM_PROMPT}\n\n{grounding}"
+            user_prompt_parts.append(grounding)
             context_used = True
             logger.info(
                 "context_accepted schema_version=%s project=%s session=%s",
@@ -218,6 +221,11 @@ async def query(req: QueryRequest):
             )
     else:
         logger.info("context_absent session=%s", session_id)
+
+    query_param = QueryParam(
+        mode=req.mode,
+        user_prompt="\n\n".join(user_prompt_parts),
+    )
 
     try:
         # Build a contextual query using chat history
@@ -235,11 +243,7 @@ async def query(req: QueryRequest):
         else:
             enhanced_query = req.question
 
-        result = await rag.aquery(
-            enhanced_query,
-            mode=req.mode,
-            system_prompt=system_prompt,
-        )
+        result = await rag.aquery(enhanced_query, param=query_param)
 
         # Store in session history
         history.append({"role": "user", "content": req.question})
