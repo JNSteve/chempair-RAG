@@ -8,6 +8,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py .
+COPY context_models.py .
 COPY start.py .
 
 CMD ["python", "start.py"]
