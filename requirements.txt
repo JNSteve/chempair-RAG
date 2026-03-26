@@ -4,5 +4,5 @@ python-dotenv
 sentence-transformers
 numpy
 pydantic
-lightrag-hku
+lightrag-hku>=1.4.11
 raganything @ git+https://github.com/HKUDS/RAG-Anything.git
