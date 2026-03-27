@@ -50,6 +50,21 @@ ADDITIONAL_INSTRUCTIONS = (
     "Never refer to yourself as a RAG, a language model, or an AI system."
 )
 
+# ---- Prompts for the two-step context flow ----
+CONTEXT_ANALYSIS_SYSTEM = (
+    "You are a contaminated land data analyst. You will be given a user's question "
+    "and their project data. Your job is to analyse the project data in relation to "
+    "the question and produce a focused technical statement that can be looked up "
+    "against a regulatory knowledge base.\n\n"
+    "Rules:\n"
+    "- ONLY reference data that is explicitly present in the project data below.\n"
+    "- NEVER invent sample codes, analyte values, or numbers.\n"
+    "- Output a concise statement (2-4 sentences) summarising the relevant findings "
+    "from the project data and what regulatory criteria they need to be compared against.\n"
+    "- If the question is a standalone regulatory question that does not need project data "
+    "(e.g. 'what is HIL-A for lead?'), respond with exactly: DIRECT_LOOKUP"
+)
+
 # ---- Session storage ----
 # Each session stores chat history so users can refine questions
 sessions: dict[str, dict] = {}
@@ -205,28 +220,53 @@ async def query(req: QueryRequest):
         logger.info("context_absent session=%s", session_id)
 
     try:
-        # Build query from chat history
+        # Build conversation context from history
+        conversation_prefix = ""
         if history:
             context_parts = []
             for msg in history[-6:]:
                 context_parts.append(f"{msg['role'].upper()}: {msg['content'][:300]}")
-            conversation_context = "\n".join(context_parts)
-            enhanced_query = (
-                f"Previous conversation:\n{conversation_context}\n\n"
-                f"Follow-up question: {req.question}"
+            conversation_prefix = (
+                f"Previous conversation:\n" + "\n".join(context_parts) + "\n\n"
             )
-        else:
-            enhanced_query = req.question
 
-        # Build user_prompt: Alfie instructions + workspace context (if present)
-        user_prompt_parts = [ADDITIONAL_INSTRUCTIONS]
+        # ── Two-step flow when workspace context is available ─────
         if context_used and grounding:
-            user_prompt_parts.append(grounding)
+            # Step 1: Ask LLM to analyse project data and produce a focused statement
+            # or determine this is a direct regulatory lookup
+            analysis_prompt = (
+                f"User question: {req.question}\n\n"
+                f"## Project Data\n{grounding}"
+            )
+            context_statement = await openai_complete_if_cache(
+                LLM_MODEL,
+                analysis_prompt,
+                system_prompt=CONTEXT_ANALYSIS_SYSTEM,
+                api_key=os.getenv("OPENAI_API_KEY"),
+            )
 
+            if context_statement.strip() == "DIRECT_LOOKUP":
+                # Pure regulatory question — send straight to RAG
+                logger.info("context_gate=direct_lookup session=%s", session_id)
+                rag_query = conversation_prefix + req.question
+            else:
+                # Project-data question — send the focused statement to RAG
+                logger.info("context_gate=project_query session=%s", session_id)
+                rag_query = (
+                    f"{conversation_prefix}"
+                    f"Based on the following site data findings, provide the relevant "
+                    f"regulatory criteria and assessment guidance:\n\n"
+                    f"{context_statement}"
+                )
+        else:
+            # No context — straight to RAG
+            rag_query = conversation_prefix + req.question if conversation_prefix else req.question
+
+        # Step 2: Query the knowledge base
         result = await rag.aquery(
-            enhanced_query,
+            rag_query,
             mode=req.mode,
-            user_prompt="\n\n".join(user_prompt_parts),
+            user_prompt=ADDITIONAL_INSTRUCTIONS,
         )
 
         # Store in session history
