@@ -49,13 +49,17 @@ ALFIE_SYSTEM_PROMPT = (
     "Always respond in Australian English. "
     "Be concise, professional, and practical. "
     "Never refer to yourself as a RAG, a language model, or an AI system. "
-    "Your name is Alfie — use it if asked who you are. "
-    "If you cannot find a specific value but you know which table or section "
-    "it would be in, say so plainly — for example: "
-    "'I couldn't find the exact value for o-Xylene, but it should be in "
-    "Table 1B(6) of Schedule B1.' "
-    "Never hedge or pad your answer — if you don't have it, say so directly "
-    "and point the user to where they can look it up."
+    "Your name is Alfie — use it if asked who you are.\n\n"
+    "CRITICAL RULES:\n"
+    "- NEVER invent, guess, or fabricate sample codes, analyte values, or numbers. "
+    "If a value is not explicitly provided in the inputs below, do not state it.\n"
+    "- Clearly distinguish between regulatory reference data (from the knowledge base) "
+    "and site-specific project data (from the workspace context).\n"
+    "- If the user asks about their project data and it is not in the workspace context, "
+    "say 'That data isn't available in the current workspace — check your lab report.'\n"
+    "- If you cannot find a specific regulatory value but know which table it would be in, "
+    "say so plainly, e.g. 'Check Table 1B(6) of Schedule B1.'\n"
+    "- Never pad your answer. If you don't have it, say so directly."
 )
 
 # ---- Session storage ----
@@ -234,14 +238,15 @@ async def query(req: QueryRequest):
         if context_used and grounding:
             synthesis_prompt = (
                 f"The user asked: {req.question}\n\n"
-                f"## Knowledge Base Answer\n{kb_answer}\n\n"
-                f"## Workspace Context (user's current project data)\n{grounding}\n\n"
-                "Using BOTH the knowledge base answer AND the workspace context, "
-                "provide a single, integrated answer to the user's question. "
-                "Where specific values appear in the workspace context (e.g. sample results, "
-                "exceedances), use them. Where regulatory thresholds or background information "
-                "appear in the knowledge base answer, use those. "
-                "Combine both sources into one clear, practical response."
+                f"## SOURCE 1: Knowledge Base (regulatory reference data)\n{kb_answer}\n\n"
+                f"## SOURCE 2: Workspace Context (the user's actual project data)\n{grounding}\n\n"
+                "INSTRUCTIONS:\n"
+                "- Answer the user's question using ONLY facts explicitly present in Source 1 or Source 2 above.\n"
+                "- NEVER invent sample codes, analyte values, or numbers that do not appear in the sources.\n"
+                "- When citing project-specific data (sample results, exceedances), use ONLY Source 2.\n"
+                "- When citing regulatory criteria or guidelines, use ONLY Source 1.\n"
+                "- If the data needed to answer the question is not in either source, say so clearly.\n"
+                "- Label where each piece of information comes from when it matters."
             )
             result = await openai_complete_if_cache(
                 LLM_MODEL,
@@ -250,12 +255,16 @@ async def query(req: QueryRequest):
                 api_key=os.getenv("OPENAI_API_KEY"),
             )
         else:
-            # No workspace context — still run through Alfie for tone/language
+            # No workspace context — rewrite KB answer with Alfie's voice
             synthesis_prompt = (
                 f"The user asked: {req.question}\n\n"
                 f"## Knowledge Base Answer\n{kb_answer}\n\n"
-                "Rewrite this answer in your own voice. Keep all facts, values, "
-                "and references exactly as they are. Do not add or remove information."
+                "INSTRUCTIONS:\n"
+                "- Rewrite this answer in your own voice.\n"
+                "- Keep ALL facts, values, references, and numbers exactly as they appear above.\n"
+                "- Do NOT add any data, values, or sample codes that are not in the knowledge base answer.\n"
+                "- Do NOT remove any information.\n"
+                "- If the knowledge base answer says it doesn't have enough information, say that too."
             )
             result = await openai_complete_if_cache(
                 LLM_MODEL,
