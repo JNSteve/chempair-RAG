@@ -178,15 +178,11 @@ async def query(req: QueryRequest):
     cleanup_sessions()
     session_id, history = get_or_create_session(req.session_id)
 
-    # ── Context validation & grounding ──────────────────────────
-    # Alfie's identity and any workspace grounding are prepended to the query
-    # as additional instructions. We do NOT pass system_prompt to rag.aquery()
-    # because that replaces LightRAG's built-in retrieval prompt.
-    query_preamble_parts: list[str] = [f"[Additional instructions: {ALFIE_SYSTEM_PROMPT}]"]
+    # ── Context validation ──────────────────────────────────────
+    grounding: str = ""
     context_used = False
 
     if req.context is not None:
-        # Size guardrail: reject oversized context payloads
         try:
             context_bytes = len(req.context.model_dump_json().encode("utf-8"))
         except Exception:
@@ -195,9 +191,7 @@ async def query(req: QueryRequest):
         if context_bytes > MAX_CONTEXT_PAYLOAD_BYTES:
             logger.warning(
                 "context_rejected reason=oversize size_bytes=%d limit=%d session=%s",
-                context_bytes,
-                MAX_CONTEXT_PAYLOAD_BYTES,
-                session_id,
+                context_bytes, MAX_CONTEXT_PAYLOAD_BYTES, session_id,
             )
             raise HTTPException(
                 status_code=422,
@@ -206,7 +200,6 @@ async def query(req: QueryRequest):
 
         grounding = build_grounding_prompt(req.context)
         if grounding:
-            query_preamble_parts.append(grounding)
             context_used = True
             logger.info(
                 "context_accepted schema_version=%s project=%s session=%s",
@@ -215,33 +208,61 @@ async def query(req: QueryRequest):
                 session_id,
             )
         else:
-            logger.info(
-                "context_present_but_empty session=%s",
-                session_id,
-            )
+            logger.info("context_present_but_empty session=%s", session_id)
     else:
         logger.info("context_absent session=%s", session_id)
 
-    query_preamble = "\n\n".join(query_preamble_parts)
-
     try:
-        # Build a contextual query using chat history
+        # ── Step 1: Retrieve from knowledge base (clean query) ────
         if history:
-            # Summarize recent conversation for context
             context_parts = []
-            for msg in history[-6:]:  # last 3 exchanges
+            for msg in history[-6:]:
                 context_parts.append(f"{msg['role'].upper()}: {msg['content'][:300]}")
             conversation_context = "\n".join(context_parts)
-
             enhanced_query = (
-                f"{query_preamble}\n\n"
                 f"Previous conversation:\n{conversation_context}\n\n"
                 f"Follow-up question: {req.question}"
             )
         else:
-            enhanced_query = f"{query_preamble}\n\n{req.question}"
+            enhanced_query = req.question
 
-        result = await rag.aquery(enhanced_query, mode=req.mode)
+        kb_answer = await rag.aquery(enhanced_query, mode=req.mode)
+
+        # ── Step 2: Synthesise with workspace context ─────────────
+        # If workspace context was provided, do a second LLM call that
+        # combines the KB answer with the project-specific data.
+        if context_used and grounding:
+            synthesis_prompt = (
+                f"The user asked: {req.question}\n\n"
+                f"## Knowledge Base Answer\n{kb_answer}\n\n"
+                f"## Workspace Context (user's current project data)\n{grounding}\n\n"
+                "Using BOTH the knowledge base answer AND the workspace context, "
+                "provide a single, integrated answer to the user's question. "
+                "Where specific values appear in the workspace context (e.g. sample results, "
+                "exceedances), use them. Where regulatory thresholds or background information "
+                "appear in the knowledge base answer, use those. "
+                "Combine both sources into one clear, practical response."
+            )
+            result = await openai_complete_if_cache(
+                LLM_MODEL,
+                synthesis_prompt,
+                system_prompt=ALFIE_SYSTEM_PROMPT,
+                api_key=os.getenv("OPENAI_API_KEY"),
+            )
+        else:
+            # No workspace context — still run through Alfie for tone/language
+            synthesis_prompt = (
+                f"The user asked: {req.question}\n\n"
+                f"## Knowledge Base Answer\n{kb_answer}\n\n"
+                "Rewrite this answer in your own voice. Keep all facts, values, "
+                "and references exactly as they are. Do not add or remove information."
+            )
+            result = await openai_complete_if_cache(
+                LLM_MODEL,
+                synthesis_prompt,
+                system_prompt=ALFIE_SYSTEM_PROMPT,
+                api_key=os.getenv("OPENAI_API_KEY"),
+            )
 
         # Store in session history
         history.append({"role": "user", "content": req.question})
@@ -249,7 +270,7 @@ async def query(req: QueryRequest):
 
         # Auto-reset if we've hit the max exchanges
         session_reset = False
-        if len(history) >= MAX_EXCHANGES * 2:  # 2 messages per exchange (user + assistant)
+        if len(history) >= MAX_EXCHANGES * 2:
             del sessions[session_id]
             session_reset = True
 
