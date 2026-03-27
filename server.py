@@ -41,28 +41,47 @@ MAX_EXCHANGES = 3  # auto-reset session after 3 exchanges to avoid context pollu
 
 logger = logging.getLogger("chempair.query")
 
-# ---- Additional instructions injected via QueryParam.user_prompt ----
-# Kept lightweight so it doesn't compete with KB context for token budget.
-# LightRAG's own "You are an expert AI assistant" role stays intact.
-ADDITIONAL_INSTRUCTIONS = (
-    "Always respond in Australian English. "
-    "If asked who you are, say your name is Alfie. "
-    "Never refer to yourself as a RAG, a language model, or an AI system."
+# ---- Alfie persona for the RAG answer step (user_prompt) ----
+# This goes into LightRAG's "Additional Instructions" slot.
+# Keep concise — shares token budget with KB context.
+ALFIE_USER_PROMPT = (
+    "You are Alfie, a senior Australian environmental scientist. "
+    "Respond in Australian English. Never mention RAG, LLM, or AI.\n"
+    "Style: concise, practical, technically sound. Short paragraphs, plain headings. "
+    "No decorative markdown (no ***), no nested bullets, no chatbot phrasing.\n"
+    "Give a direct answer first. Ground statements in retrieved data. "
+    "If information is missing, say so briefly. Do not invent values or sample codes.\n"
+    "Structure (skip sections if not needed): "
+    "Answer (1 short paragraph) → Key findings (1 sentence per issue) → "
+    "Implications (1 paragraph if useful) → Next steps (2-4 actions if useful)."
 )
 
 # ---- Prompts for the two-step context flow ----
-CONTEXT_ANALYSIS_SYSTEM = (
-    "You are a contaminated land data analyst. You will be given a user's question "
-    "and their project data. Your job is to analyse the project data in relation to "
-    "the question and produce a focused technical statement that can be looked up "
-    "against a regulatory knowledge base.\n\n"
-    "Rules:\n"
-    "- ONLY reference data that is explicitly present in the project data below.\n"
-    "- NEVER invent sample codes, analyte values, or numbers.\n"
-    "- Output a concise statement (2-4 sentences) summarising the relevant findings "
-    "from the project data and what regulatory criteria they need to be compared against.\n"
+CONTEXT_EXTRACTION_SYSTEM = (
+    "You are a workspace-context extraction step for Alfie.\n\n"
+    "Your job is to read the current workspace/project state and the user's question, "
+    "then produce a compact structured context object containing ONLY the data relevant "
+    "to the question. This will be used for downstream retrieval and answer generation.\n\n"
+    "Requirements:\n"
+    "- Extract only information that is actually present in the current workspace.\n"
+    "- Filter to data relevant to the user's question.\n"
+    "- Do not infer unsupported facts.\n"
+    "- Keep the payload compact and useful for retrieval.\n"
+    "- Prioritise analytes, samples, exceedances, criteria, and other current project "
+    "signals that matter for environmental interpretation.\n"
+    "- Preserve exact sample IDs, analyte names, units, criteria names, and project "
+    "metadata where available.\n"
+    "- Omit sections that are unavailable or irrelevant to the question.\n"
+    "- Do not write a narrative answer.\n"
+    "- Do not include markdown.\n"
     "- If the question is a standalone regulatory question that does not need project data "
-    "(e.g. 'what is HIL-A for lead?'), respond with exactly: DIRECT_LOOKUP"
+    "(e.g. 'what is HIL-A for lead?'), respond with exactly: DIRECT_LOOKUP\n\n"
+    "Output valid JSON only with these fields (omit if empty):\n"
+    "- project: {projectName, siteName, projectType, landUse}\n"
+    "- criteria: {applicableCriteria, landUse, state, relevantDetails: [{name, thresholds}]}\n"
+    "- exceedances: [{analyte, sampleCode, value, unit, criterion, criterionValue}]\n"
+    "- relevantSamples: [{sampleCode, depth, analyteValues: [{analyte, value, unit}]}]\n"
+    "- summary: one sentence stating what the user wants to know about this data"
 )
 
 # ---- Session storage ----
@@ -232,41 +251,80 @@ async def query(req: QueryRequest):
 
         # ── Two-step flow when workspace context is available ─────
         if context_used and grounding:
-            # Step 1: Ask LLM to analyse project data and produce a focused statement
-            # or determine this is a direct regulatory lookup
-            analysis_prompt = (
+            # Step 1: Extract question-relevant project data as structured JSON
+            extraction_prompt = (
                 f"User question: {req.question}\n\n"
-                f"## Project Data\n{grounding}"
+                f"## Workspace Data\n{grounding}"
             )
-            context_statement = await openai_complete_if_cache(
+            extraction_result = await openai_complete_if_cache(
                 LLM_MODEL,
-                analysis_prompt,
-                system_prompt=CONTEXT_ANALYSIS_SYSTEM,
+                extraction_prompt,
+                system_prompt=CONTEXT_EXTRACTION_SYSTEM,
                 api_key=os.getenv("OPENAI_API_KEY"),
             )
 
-            if context_statement.strip() == "DIRECT_LOOKUP":
+            if extraction_result.strip() == "DIRECT_LOOKUP":
                 # Pure regulatory question — send straight to RAG
                 logger.info("context_gate=direct_lookup session=%s", session_id)
                 rag_query = conversation_prefix + req.question
             else:
-                # Project-data question — send the focused statement to RAG
+                # Project-data question — build a focused RAG query from the JSON
                 logger.info("context_gate=project_query session=%s", session_id)
-                rag_query = (
-                    f"{conversation_prefix}"
-                    f"Based on the following site data findings, provide the relevant "
-                    f"regulatory criteria and assessment guidance:\n\n"
-                    f"{context_statement}"
-                )
+                try:
+                    # Parse JSON and build a focused query
+                    filtered = json.loads(extraction_result)
+                    query_parts = [req.question]
+
+                    # Add project context
+                    proj = filtered.get("project", {})
+                    if proj.get("siteName") or proj.get("projectType"):
+                        query_parts.append(
+                            f"Site: {proj.get('siteName', 'unknown')}, "
+                            f"land use: {proj.get('landUse', proj.get('projectType', 'unknown'))}"
+                        )
+
+                    # Add exceedances as specific lookup items
+                    for ex in filtered.get("exceedances", []):
+                        query_parts.append(
+                            f"{ex.get('analyte', '?')} at {ex.get('value', '?')} {ex.get('unit', '')} "
+                            f"in {ex.get('sampleCode', '?')} "
+                            f"(criterion: {ex.get('criterion', '?')} = {ex.get('criterionValue', '?')})"
+                        )
+
+                    # Add relevant sample data
+                    for row in filtered.get("relevantSamples", []):
+                        vals = ", ".join(
+                            f"{av.get('analyte', '?')}={av.get('value', '?')} {av.get('unit', '')}"
+                            for av in row.get("analyteValues", [])
+                        )
+                        if vals:
+                            query_parts.append(
+                                f"Sample {row.get('sampleCode', '?')} ({row.get('depth', '?')}): {vals}"
+                            )
+
+                    # Add summary if present
+                    summary = filtered.get("summary", "")
+                    if summary:
+                        query_parts.append(summary)
+
+                    rag_query = conversation_prefix + "\n".join(query_parts)
+
+                except (json.JSONDecodeError, TypeError, KeyError) as e:
+                    # JSON parse failed — fall back to using raw extraction as query context
+                    logger.warning("context_json_parse_failed error=%s session=%s", str(e), session_id)
+                    rag_query = (
+                        f"{conversation_prefix}{req.question}\n\n"
+                        f"Site data context:\n{extraction_result[:1000]}"
+                    )
         else:
             # No context — straight to RAG
             rag_query = conversation_prefix + req.question if conversation_prefix else req.question
 
-        # Step 2: Query the knowledge base
+        # Step 2: Query the knowledge base with Alfie persona
         result = await rag.aquery(
             rag_query,
             mode=req.mode,
-            user_prompt=ADDITIONAL_INSTRUCTIONS,
+            user_prompt=ALFIE_USER_PROMPT,
         )
 
         # Store in session history
