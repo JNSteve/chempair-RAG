@@ -250,8 +250,19 @@ async def query(req: QueryRequest):
                 api_key=os.getenv("OPENAI_API_KEY"),
             )
         else:
-            # No workspace context — return KB answer directly
-            result = kb_answer
+            # No workspace context — still run through Alfie for tone/language
+            synthesis_prompt = (
+                f"The user asked: {req.question}\n\n"
+                f"## Knowledge Base Answer\n{kb_answer}\n\n"
+                "Rewrite this answer in your own voice. Keep all facts, values, "
+                "and references exactly as they are. Do not add or remove information."
+            )
+            result = await openai_complete_if_cache(
+                LLM_MODEL,
+                synthesis_prompt,
+                system_prompt=ALFIE_SYSTEM_PROMPT,
+                api_key=os.getenv("OPENAI_API_KEY"),
+            )
 
         # Store in session history
         history.append({"role": "user", "content": req.question})
