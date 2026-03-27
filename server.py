@@ -1,32 +1,25 @@
 """
 FastAPI server for querying the RAG knowledge graph.
 Your Chempair app calls this API to get answers from the ingested regulatory docs.
-Supports conversational sessions so users can refine their questions.
+Supports conversational sessions so users can refine questions.
 """
 
 import json
 import logging
 import os
-import uuid
 import time
-import numpy as np
-from pathlib import Path
+import uuid
 
+import numpy as np
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 
-from context_models import (
-    WorkspaceContext,
-    build_grounding_prompt,
-    MAX_CONTEXT_PAYLOAD_BYTES,
-)
-
+from context_models import WorkspaceContext, MAX_CONTEXT_PAYLOAD_BYTES
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
-
 from raganything import RAGAnything, RAGAnythingConfig
 
 load_dotenv()
@@ -36,60 +29,62 @@ RAG_STORAGE = os.environ.get("RAG_STORAGE", "./rag_storage")
 LLM_MODEL = "gpt-5.4-mini"
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
-SESSION_TTL = 3600  # sessions expire after 1 hour of inactivity
-MAX_EXCHANGES = 3  # auto-reset session after 3 exchanges to avoid context pollution
+SESSION_TTL = 3600
+MAX_EXCHANGES = 3
 
 logger = logging.getLogger("chempair.query")
 
-# ---- Alfie persona for the RAG answer step (user_prompt) ----
-# This goes into LightRAG's "Additional Instructions" slot.
-# Keep concise — shares token budget with KB context.
 ALFIE_USER_PROMPT = (
     "You are Alfie, a senior Australian environmental scientist. "
     "Respond in Australian English. Never mention RAG, LLM, or AI.\n"
-    "Formatting rules: Do NOT use ## headings. Do NOT use ** bold **. "
-    "Do NOT use bullet points unless listing more than 4 items. "
-    "Write in plain prose like a short consultant email.\n"
-    "Give a direct answer first. Do not repeat the same fact twice. "
-    "Do not invent values or sample codes. "
-    "Keep responses to 2-3 short paragraphs. Be brief."
+    "Give a direct answer first. Write like a concise consultant email. "
+    "Do not use decorative markdown, bold text, or long bullet lists. "
+    "Do not invent values, criteria, or sample codes. "
+    "If notable analyte or sample issues exist, keep each issue to one sentence where practical. "
+    "Keep responses to short structured prose."
 )
 
-# ---- Prompts for the two-step context flow ----
+PROJECT_ONLY_ANSWER_SYSTEM = (
+    "You are Alfie, a senior Australian environmental scientist.\n\n"
+    "Answer using only the supplied project context JSON.\n"
+    "Do not mention the knowledge base, RAG, prompts, or internal routing.\n"
+    "Be concise, practical, and human. Use Australian professional English.\n"
+    "Do not invent values, criteria, or sample codes.\n"
+    "If the project context does not contain the answer, say so plainly.\n"
+    "Prefer short paragraphs. Avoid decorative markdown and unnecessary bullet points."
+)
+
 CONTEXT_EXTRACTION_SYSTEM = (
     "You are a workspace-context extraction step for Alfie.\n\n"
-    "Your job is to read the current workspace/project state and the user's question, "
-    "then produce a compact structured context object containing ONLY the data relevant "
-    "to the question. This will be used for downstream retrieval and answer generation.\n\n"
+    "Your job is to read the current workspace/project state JSON and the user's question, "
+    "then classify the question and extract ONLY the project data relevant to answering it.\n\n"
+    "Route the question as one of:\n"
+    "- kb_only: the question is purely regulatory or knowledge-base driven and does not need project data.\n"
+    "- project_only: the question can be answered directly from the project data without the knowledge base.\n"
+    "- blended: the question needs both project data and knowledge-base interpretation.\n\n"
     "Requirements:\n"
     "- Extract only information that is actually present in the current workspace.\n"
     "- Filter to data relevant to the user's question.\n"
     "- Do not infer unsupported facts.\n"
-    "- Keep the payload compact and useful for retrieval.\n"
-    "- Prioritise analytes, samples, exceedances, criteria, and other current project "
-    "signals that matter for environmental interpretation.\n"
-    "- Preserve exact sample IDs, analyte names, units, criteria names, and project "
-    "metadata where available.\n"
+    "- Preserve exact sample IDs, analyte names, units, criteria names, and project metadata where available.\n"
     "- Omit sections that are unavailable or irrelevant to the question.\n"
     "- Do not write a narrative answer.\n"
     "- Do not include markdown.\n"
-    "- If the question is a standalone regulatory question that does not need project data "
-    "(e.g. 'what is HIL-A for lead?'), respond with exactly: DIRECT_LOOKUP\n\n"
     "Output valid JSON only with these fields (omit if empty):\n"
-    "- project: {projectName, siteName, projectType, landUse}\n"
-    "- criteria: {applicableCriteria, landUse, state, relevantDetails: [{name, thresholds}]}\n"
+    "- route: kb_only | project_only | blended\n"
+    "- project: {projectName, siteName, address, projectType, labReportNumber}\n"
+    "- selectedCriteria: {applicableCriteria, regulations, landUse, state, criteriaNames, criteriaCount}\n"
+    "- criteria: {criteriaDetails: [{name, thresholds}]}\n"
+    "- exceedanceSummary: {totalExceedances, affectedSamples, affectedAnalytes, exceededCriteria, hotspotCount}\n"
     "- exceedances: [{analyte, sampleCode, value, unit, criterion, criterionValue}]\n"
     "- relevantSamples: [{sampleCode, depth, analyteValues: [{analyte, value, unit}]}]\n"
     "- summary: one sentence stating what the user wants to know about this data"
 )
 
-# ---- Session storage ----
-# Each session stores chat history so users can refine questions
 sessions: dict[str, dict] = {}
 
 
 def get_or_create_session(session_id: str | None) -> tuple[str, list[dict]]:
-    """Get existing session or create a new one. Returns (session_id, history)."""
     if session_id and session_id in sessions:
         sessions[session_id]["last_used"] = time.time()
         return session_id, sessions[session_id]["history"]
@@ -100,14 +95,12 @@ def get_or_create_session(session_id: str | None) -> tuple[str, list[dict]]:
 
 
 def cleanup_sessions():
-    """Remove expired sessions."""
     now = time.time()
-    expired = [sid for sid, s in sessions.items() if now - s["last_used"] > SESSION_TTL]
-    for sid in expired:
-        del sessions[sid]
+    expired = [sid for sid, session in sessions.items() if now - session["last_used"] > SESSION_TTL]
+    for session_id in expired:
+        del sessions[session_id]
 
 
-# ---- Embedding setup ----
 _embed_model = None
 
 
@@ -124,7 +117,6 @@ async def local_embed(texts: list[str]) -> np.ndarray:
     return np.array(embeddings, dtype=np.float32)
 
 
-# ---- LLM setup ----
 def llm_model_func(prompt, system_prompt=None, history_messages=[], **kwargs):
     return openai_complete_if_cache(
         LLM_MODEL,
@@ -136,18 +128,16 @@ def llm_model_func(prompt, system_prompt=None, history_messages=[], **kwargs):
     )
 
 
-# ---- FastAPI app ----
 app = FastAPI(title="Chempair RAG API", description="Environmental regulatory document Q&A")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten this in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize RAG on startup
 rag = None
 
 
@@ -170,9 +160,7 @@ async def startup():
         llm_model_func=llm_model_func,
         embedding_func=embedding_func,
     )
-    # Skip parser check — we're only querying, not parsing
     rag._parser_installation_checked = True
-    # Initialize the LightRAG storage so it loads existing data
     result = await rag._ensure_lightrag_initialized()
     if result.get("success"):
         print("RAG loaded and ready!")
@@ -182,17 +170,116 @@ async def startup():
 
 class QueryRequest(BaseModel):
     question: str
-    mode: str = "hybrid"  # local, global, hybrid, naive, mix
-    session_id: str | None = None  # pass to continue a conversation
-    context: WorkspaceContext | None = None  # optional structured workspace context
+    mode: str = "hybrid"
+    session_id: str | None = None
+    context: WorkspaceContext | None = None
 
 
 class QueryResponse(BaseModel):
     answer: str
     mode: str
-    session_id: str  # return to client so they can continue the conversation
-    session_reset: bool = False  # true when session hit max exchanges and was cleared
-    context_used: bool = False  # true when structured workspace context was applied
+    session_id: str
+    session_reset: bool = False
+    context_used: bool = False
+
+
+def _has_usable_context(ctx: WorkspaceContext) -> bool:
+    payload = ctx.model_dump(exclude_none=True)
+    return any(key not in {"schemaVersion", "generatedAtIso"} for key in payload.keys())
+
+
+def _build_context_json(ctx: WorkspaceContext) -> str:
+    return json.dumps(ctx.model_dump(exclude_none=True), ensure_ascii=False, indent=2)
+
+
+def _build_blended_rag_query(question: str, filtered: dict) -> str:
+    query_parts = [question]
+
+    project = filtered.get("project", {})
+    if project:
+        project_bits = []
+        if project.get("siteName"):
+            project_bits.append(f"Site: {project['siteName']}")
+        if project.get("address"):
+            project_bits.append(f"Address: {project['address']}")
+        if project.get("projectType"):
+            project_bits.append(f"Project type: {project['projectType']}")
+        if project.get("labReportNumber"):
+            project_bits.append(f"Lab report: {project['labReportNumber']}")
+        if project_bits:
+            query_parts.append("; ".join(project_bits))
+
+    selected_criteria = filtered.get("selectedCriteria", {})
+    if selected_criteria:
+        criteria_bits = []
+        if selected_criteria.get("applicableCriteria"):
+            criteria_bits.append(
+                f"Applicable criteria: {selected_criteria['applicableCriteria']}"
+            )
+        if selected_criteria.get("landUse"):
+            criteria_bits.append(f"Land use: {selected_criteria['landUse']}")
+        if selected_criteria.get("state"):
+            criteria_bits.append(f"State: {selected_criteria['state']}")
+        if selected_criteria.get("criteriaNames"):
+            criteria_bits.append(
+                f"Selected criteria: {', '.join(selected_criteria['criteriaNames'])}"
+            )
+        if criteria_bits:
+            query_parts.append("; ".join(criteria_bits))
+
+    exceedance_summary = filtered.get("exceedanceSummary", {})
+    if exceedance_summary:
+        summary_bits = []
+        if exceedance_summary.get("totalExceedances") is not None:
+            summary_bits.append(
+                f"Total exceedances: {exceedance_summary['totalExceedances']}"
+            )
+        if exceedance_summary.get("exceededCriteria"):
+            summary_bits.append(
+                f"Exceeded criteria: {', '.join(exceedance_summary['exceededCriteria'])}"
+            )
+        if exceedance_summary.get("affectedAnalytes"):
+            summary_bits.append(
+                f"Affected analytes: {', '.join(exceedance_summary['affectedAnalytes'])}"
+            )
+        if summary_bits:
+            query_parts.append("; ".join(summary_bits))
+
+    criteria = filtered.get("criteria", {})
+    for detail in criteria.get("criteriaDetails", []):
+        threshold_bits = []
+        for threshold in detail.get("thresholds", []):
+            analyte = threshold.get("analyte", "?")
+            value = threshold.get("value", "?")
+            unit = threshold.get("unit", "")
+            threshold_bits.append(f"{analyte}={value} {unit}".strip())
+        if threshold_bits:
+            query_parts.append(
+                f"Criterion {detail.get('name', '?')}: {'; '.join(threshold_bits)}"
+            )
+
+    for exceedance in filtered.get("exceedances", []):
+        query_parts.append(
+            f"{exceedance.get('analyte', '?')} at {exceedance.get('value', '?')} "
+            f"{exceedance.get('unit', '')} in {exceedance.get('sampleCode', '?')} "
+            f"(criterion: {exceedance.get('criterion', '?')} = {exceedance.get('criterionValue', '?')})"
+        )
+
+    for row in filtered.get("relevantSamples", []):
+        values = ", ".join(
+            f"{item.get('analyte', '?')}={item.get('value', '?')} {item.get('unit', '')}".strip()
+            for item in row.get("analyteValues", [])
+        )
+        if values:
+            query_parts.append(
+                f"Sample {row.get('sampleCode', '?')} ({row.get('depth', '?')}): {values}"
+            )
+
+    summary = filtered.get("summary")
+    if summary:
+        query_parts.append(summary)
+
+    return "\n".join(query_parts)
 
 
 @app.post("/query", response_model=QueryResponse)
@@ -202,9 +289,6 @@ async def query(req: QueryRequest):
 
     cleanup_sessions()
     session_id, history = get_or_create_session(req.session_id)
-
-    # ── Context validation ──────────────────────────────────────
-    grounding: str = ""
     context_used = False
 
     if req.context is not None:
@@ -216,20 +300,23 @@ async def query(req: QueryRequest):
         if context_bytes > MAX_CONTEXT_PAYLOAD_BYTES:
             logger.warning(
                 "context_rejected reason=oversize size_bytes=%d limit=%d session=%s",
-                context_bytes, MAX_CONTEXT_PAYLOAD_BYTES, session_id,
+                context_bytes,
+                MAX_CONTEXT_PAYLOAD_BYTES,
+                session_id,
             )
             raise HTTPException(
                 status_code=422,
                 detail=f"context payload too large ({context_bytes} bytes, limit {MAX_CONTEXT_PAYLOAD_BYTES})",
             )
 
-        grounding = build_grounding_prompt(req.context)
-        if grounding:
+        if _has_usable_context(req.context):
             context_used = True
             logger.info(
                 "context_accepted schema_version=%s project=%s session=%s",
                 req.context.schemaVersion,
-                req.context.project.projectName if req.context.project else None,
+                req.context.projectState.project.projectName
+                if req.context.projectState and req.context.projectState.project
+                else None,
                 session_id,
             )
         else:
@@ -238,22 +325,19 @@ async def query(req: QueryRequest):
         logger.info("context_absent session=%s", session_id)
 
     try:
-        # Build conversation context from history
         conversation_prefix = ""
         if history:
             context_parts = []
-            for msg in history[-6:]:
-                context_parts.append(f"{msg['role'].upper()}: {msg['content'][:300]}")
-            conversation_prefix = (
-                f"Previous conversation:\n" + "\n".join(context_parts) + "\n\n"
-            )
+            for message in history[-6:]:
+                context_parts.append(f"{message['role'].upper()}: {message['content'][:300]}")
+            conversation_prefix = "Previous conversation:\n" + "\n".join(context_parts) + "\n\n"
 
-        # ── Two-step flow when workspace context is available ─────
-        if context_used and grounding:
-            # Step 1: Extract question-relevant project data as structured JSON
+        result = None
+
+        if context_used:
             extraction_prompt = (
                 f"User question: {req.question}\n\n"
-                f"## Workspace Data\n{grounding}"
+                f"Workspace context JSON:\n{_build_context_json(req.context)}"
             )
             extraction_result = await openai_complete_if_cache(
                 LLM_MODEL,
@@ -262,75 +346,47 @@ async def query(req: QueryRequest):
                 api_key=os.getenv("OPENAI_API_KEY"),
             )
 
-            if extraction_result.strip() == "DIRECT_LOOKUP":
-                # Pure regulatory question — send straight to RAG
-                logger.info("context_gate=direct_lookup session=%s", session_id)
+            try:
+                filtered = json.loads(extraction_result)
+                route = filtered.get("route", "blended")
+            except (json.JSONDecodeError, TypeError, KeyError):
+                logger.warning("context_json_parse_failed session=%s", session_id)
+                filtered = {"route": "blended", "summary": extraction_result[:1000]}
+                route = "blended"
+
+            logger.info("context_route=%s session=%s", route, session_id)
+
+            if route == "project_only":
+                answer_prompt = (
+                    f"User question: {req.question}\n\n"
+                    f"Relevant project context JSON:\n"
+                    f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
+                )
+                result = await openai_complete_if_cache(
+                    LLM_MODEL,
+                    answer_prompt,
+                    system_prompt=PROJECT_ONLY_ANSWER_SYSTEM,
+                    api_key=os.getenv("OPENAI_API_KEY"),
+                )
+            elif route == "kb_only":
                 rag_query = conversation_prefix + req.question
             else:
-                # Project-data question — build a focused RAG query from the JSON
-                logger.info("context_gate=project_query session=%s", session_id)
-                try:
-                    # Parse JSON and build a focused query
-                    filtered = json.loads(extraction_result)
-                    query_parts = [req.question]
-
-                    # Add project context
-                    proj = filtered.get("project", {})
-                    if proj.get("siteName") or proj.get("projectType"):
-                        query_parts.append(
-                            f"Site: {proj.get('siteName', 'unknown')}, "
-                            f"land use: {proj.get('landUse', proj.get('projectType', 'unknown'))}"
-                        )
-
-                    # Add exceedances as specific lookup items
-                    for ex in filtered.get("exceedances", []):
-                        query_parts.append(
-                            f"{ex.get('analyte', '?')} at {ex.get('value', '?')} {ex.get('unit', '')} "
-                            f"in {ex.get('sampleCode', '?')} "
-                            f"(criterion: {ex.get('criterion', '?')} = {ex.get('criterionValue', '?')})"
-                        )
-
-                    # Add relevant sample data
-                    for row in filtered.get("relevantSamples", []):
-                        vals = ", ".join(
-                            f"{av.get('analyte', '?')}={av.get('value', '?')} {av.get('unit', '')}"
-                            for av in row.get("analyteValues", [])
-                        )
-                        if vals:
-                            query_parts.append(
-                                f"Sample {row.get('sampleCode', '?')} ({row.get('depth', '?')}): {vals}"
-                            )
-
-                    # Add summary if present
-                    summary = filtered.get("summary", "")
-                    if summary:
-                        query_parts.append(summary)
-
-                    rag_query = conversation_prefix + "\n".join(query_parts)
-
-                except (json.JSONDecodeError, TypeError, KeyError) as e:
-                    # JSON parse failed — fall back to using raw extraction as query context
-                    logger.warning("context_json_parse_failed error=%s session=%s", str(e), session_id)
-                    rag_query = (
-                        f"{conversation_prefix}{req.question}\n\n"
-                        f"Site data context:\n{extraction_result[:1000]}"
-                    )
+                rag_query = conversation_prefix + _build_blended_rag_query(
+                    req.question, filtered
+                )
         else:
-            # No context — straight to RAG
             rag_query = conversation_prefix + req.question if conversation_prefix else req.question
 
-        # Step 2: Query the knowledge base with Alfie persona
-        result = await rag.aquery(
-            rag_query,
-            mode=req.mode,
-            user_prompt=ALFIE_USER_PROMPT,
-        )
+        if result is None:
+            result = await rag.aquery(
+                rag_query,
+                mode=req.mode,
+                user_prompt=ALFIE_USER_PROMPT,
+            )
 
-        # Store in session history
         history.append({"role": "user", "content": req.question})
         history.append({"role": "assistant", "content": result})
 
-        # Auto-reset if we've hit the max exchanges
         session_reset = False
         if len(history) >= MAX_EXCHANGES * 2:
             del sessions[session_id]
@@ -343,13 +399,12 @@ async def query(req: QueryRequest):
             session_reset=session_reset,
             context_used=context_used,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
 
 
 @app.post("/session/new")
 async def new_session():
-    """Start a fresh conversation session."""
     session_id = str(uuid.uuid4())
     sessions[session_id] = {"history": [], "last_used": time.time()}
     return {"session_id": session_id}
@@ -357,7 +412,6 @@ async def new_session():
 
 @app.get("/session/{session_id}/history")
 async def get_history(session_id: str):
-    """Get conversation history for a session."""
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"session_id": session_id, "history": sessions[session_id]["history"]}
@@ -365,7 +419,6 @@ async def get_history(session_id: str):
 
 @app.delete("/session/{session_id}")
 async def delete_session(session_id: str):
-    """End a conversation session."""
     if session_id in sessions:
         del sessions[session_id]
     return {"status": "deleted"}

@@ -1,9 +1,8 @@
 """
-Pydantic models for the optional structured workspace context
-sent by the Chempair frontend on POST /query.
+Pydantic models for the structured workspace context sent by the frontend.
 
-All fields are optional and defensively validated.
-Unknown future-additive fields are allowed (extra="allow").
+The contract separates full live project state from compact retrieval context so
+the backend can route questions as project-only, KB-only, or blended.
 """
 
 from __future__ import annotations
@@ -13,14 +12,9 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# ── Guardrail constants ─────────────────────────────────────────
-# Per-field limits removed — step 1 (context extraction) handles filtering.
-# Only the overall payload size limit is enforced at the API layer.
 MAX_CONVERSATION_MESSAGES = 20
-MAX_CONTEXT_PAYLOAD_BYTES = 128 * 1024  # 128 KB
+MAX_CONTEXT_PAYLOAD_BYTES = 512 * 1024  # 512 KB
 
-
-# ── Nested models ───────────────────────────────────────────────
 
 class ProjectInfo(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -28,6 +22,7 @@ class ProjectInfo(BaseModel):
     projectName: Optional[str] = None
     projectId: Optional[str] = None
     siteName: Optional[str] = None
+    address: Optional[str] = None
     labReportNumber: Optional[str] = None
     projectType: Optional[str] = None
     sourceFile: Optional[str] = None
@@ -35,12 +30,15 @@ class ProjectInfo(BaseModel):
     totalAnalytes: Optional[int] = None
 
 
-class RetrievalHints(BaseModel):
+class SelectedCriteria(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    matchedAnalytes: Optional[List[str]] = None
-    matchedSampleCodes: Optional[List[str]] = None
-    questionTokens: Optional[List[str]] = None
+    applicableCriteria: Optional[str] = None
+    regulations: Optional[List[str]] = None
+    landUse: Optional[str] = None
+    state: Optional[str] = None
+    criteriaNames: Optional[List[str]] = None
+    criteriaCount: Optional[int] = None
 
 
 class CriterionThreshold(BaseModel):
@@ -51,35 +49,21 @@ class CriterionThreshold(BaseModel):
     unit: Optional[str] = None
 
 
-class RelevantDetail(BaseModel):
+class CriteriaDetail(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: Optional[str] = None
     thresholds: Optional[List[CriterionThreshold]] = None
 
 
-class CriteriaInfo(BaseModel):
+class ExceedanceSummary(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    applicableCriteria: Optional[str] = None
-    landUse: Optional[str] = None
-    state: Optional[str] = None
-    regulations: Optional[List[str]] = None
-    relevantDetails: Optional[List[RelevantDetail]] = None
-
-
-class FieldSummary(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    hasFieldData: Optional[bool] = None
-    sessionCount: Optional[int] = None
-    boreholeCount: Optional[int] = None
-    fieldSampleCount: Optional[int] = None
-    lithologyLogCount: Optional[int] = None
-    latestSessionDate: Optional[str] = None
-    sampleTypes: Optional[List[str]] = None
-    depthRange: Optional[str] = None
-    hasGpsData: Optional[bool] = None
+    totalExceedances: Optional[int] = None
+    affectedSamples: Optional[List[str]] = None
+    affectedAnalytes: Optional[List[str]] = None
+    exceededCriteria: Optional[List[str]] = None
+    hotspotCount: Optional[int] = None
 
 
 class Exceedance(BaseModel):
@@ -89,9 +73,11 @@ class Exceedance(BaseModel):
     sampleCode: Optional[str] = None
     criterion: Optional[str] = None
     value: Optional[float | int | str] = None
-    criterionValue: Optional[float | int] = None
+    criterionValue: Optional[float | int | str] = None
     exceedanceFactor: Optional[float] = None
+    isHotspot: Optional[bool] = None
     unit: Optional[str] = None
+    date: Optional[str] = None
 
 
 class Coordinates(BaseModel):
@@ -109,16 +95,53 @@ class AnalyteValue(BaseModel):
     unit: Optional[str] = None
 
 
-class RetrievedRow(BaseModel):
+class ProjectResultRow(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     sampleCode: Optional[str] = None
     depth: Optional[str] = None
     collectionDate: Optional[str] = None
     sampleType: Optional[str] = None
+    sampleRound: Optional[str] = None
     labName: Optional[str] = None
+    labReportNumber: Optional[str] = None
     coordinates: Optional[Coordinates] = None
     analyteValues: Optional[List[AnalyteValue]] = None
+
+
+class FieldSummary(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    hasFieldData: Optional[bool] = None
+    sessionCount: Optional[int] = None
+    boreholeCount: Optional[int] = None
+    fieldSampleCount: Optional[int] = None
+    lithologyLogCount: Optional[int] = None
+    latestSessionDate: Optional[str] = None
+    sampleTypes: Optional[List[str]] = None
+    depthRange: Optional[str] = None
+    hasGpsData: Optional[bool] = None
+
+
+class ProjectState(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    project: Optional[ProjectInfo] = None
+    selectedCriteria: Optional[SelectedCriteria] = None
+    criteriaDetails: Optional[List[CriteriaDetail]] = None
+    exceedanceSummary: Optional[ExceedanceSummary] = None
+    exceedances: Optional[List[Exceedance]] = None
+    projectResults: Optional[List[ProjectResultRow]] = None
+    fieldSummary: Optional[FieldSummary] = None
+
+
+class RetrievalContext(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    matchedAnalytes: Optional[List[str]] = None
+    matchedSampleCodes: Optional[List[str]] = None
+    questionTokens: Optional[List[str]] = None
+    retrievedRows: Optional[List[ProjectResultRow]] = None
 
 
 class ConversationMessage(BaseModel):
@@ -128,54 +151,44 @@ class ConversationMessage(BaseModel):
     content: Optional[str] = None
 
 
-# ── Top-level context model ─────────────────────────────────────
-
 class WorkspaceContext(BaseModel):
-    """
-    Structured workspace context sent by the Chempair frontend.
-    All sections are optional so legacy and partial payloads are accepted.
-    """
-
     model_config = ConfigDict(extra="allow")
 
     schemaVersion: Optional[int] = None
     generatedAtIso: Optional[str] = None
-    project: Optional[ProjectInfo] = None
-    retrieval: Optional[RetrievalHints] = None
-    criteria: Optional[CriteriaInfo] = None
-    fieldSummary: Optional[FieldSummary] = None
-    exceedances: Optional[List[Exceedance]] = None
-    retrievedRows: Optional[List[RetrievedRow]] = None
+    projectState: Optional[ProjectState] = None
+    retrievalContext: Optional[RetrievalContext] = None
     conversation: Optional[List[ConversationMessage]] = Field(
         default=None, max_length=MAX_CONVERSATION_MESSAGES
     )
 
 
-# ── Grounding prompt builder ────────────────────────────────────
-
 def build_grounding_prompt(ctx: WorkspaceContext) -> str:
     """
-    Convert structured workspace context into a grounding prompt
-    that is passed as system_prompt to the RAG query.
+    Convert structured workspace context into a readable grounding summary.
 
-    Returns an empty string when context has no usable data.
+    This is primarily used for operator visibility and tests. The query route
+    now prefers the raw context JSON for extraction so full project state is
+    available to the classification step.
     """
     sections: list[str] = []
 
-    # Project overview
-    if ctx.project:
-        p = ctx.project
+    project_state = ctx.projectState
+    retrieval_context = ctx.retrievalContext
+
+    if project_state and project_state.project:
+        p = project_state.project
         parts = []
         if p.projectName:
             parts.append(f"Project: {p.projectName}")
         if p.siteName:
             parts.append(f"Site: {p.siteName}")
+        if p.address:
+            parts.append(f"Address: {p.address}")
         if p.projectType:
             parts.append(f"Type: {p.projectType}")
         if p.labReportNumber:
             parts.append(f"Lab report: {p.labReportNumber}")
-        if p.sourceFile:
-            parts.append(f"Source file: {p.sourceFile}")
         if p.totalSamples is not None:
             parts.append(f"Total samples: {p.totalSamples}")
         if p.totalAnalytes is not None:
@@ -183,9 +196,8 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
         if parts:
             sections.append("## Project\n" + "\n".join(parts))
 
-    # Regulatory criteria
-    if ctx.criteria:
-        c = ctx.criteria
+    if project_state and project_state.selectedCriteria:
+        c = project_state.selectedCriteria
         parts = []
         if c.applicableCriteria:
             parts.append(f"Applicable criteria: {c.applicableCriteria}")
@@ -195,47 +207,47 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             parts.append(f"State: {c.state}")
         if c.regulations:
             parts.append(f"Regulations: {', '.join(c.regulations)}")
-        if c.relevantDetails:
-            for detail in c.relevantDetails:
-                if detail.name and detail.thresholds:
-                    thresh_strs = []
-                    for t in detail.thresholds:
-                        if t.analyte and t.value is not None:
-                            thresh_strs.append(
-                                f"{t.analyte}: {t.value} {t.unit or ''}"
-                            )
-                    if thresh_strs:
-                        parts.append(
-                            f"Criterion {detail.name}: {'; '.join(thresh_strs)}"
-                        )
+        if c.criteriaNames:
+            parts.append(f"Selected criteria: {', '.join(c.criteriaNames)}")
         if parts:
-            sections.append("## Regulatory Criteria\n" + "\n".join(parts))
+            sections.append("## Selected Criteria\n" + "\n".join(parts))
 
-    # Field summary
-    if ctx.fieldSummary:
-        f = ctx.fieldSummary
-        parts = []
-        if f.hasFieldData is not None:
-            parts.append(f"Has field data: {'Yes' if f.hasFieldData else 'No'}")
-        if f.boreholeCount is not None:
-            parts.append(f"Boreholes: {f.boreholeCount}")
-        if f.fieldSampleCount is not None:
-            parts.append(f"Field samples: {f.fieldSampleCount}")
-        if f.depthRange:
-            parts.append(f"Depth range: {f.depthRange}")
-        if f.sampleTypes:
-            parts.append(f"Sample types: {', '.join(f.sampleTypes)}")
-        if f.latestSessionDate:
-            parts.append(f"Latest session: {f.latestSessionDate}")
-        if f.hasGpsData is not None:
-            parts.append(f"GPS data: {'Yes' if f.hasGpsData else 'No'}")
-        if parts:
-            sections.append("## Field Summary\n" + "\n".join(parts))
-
-    # Exceedances
-    if ctx.exceedances:
+    if project_state and project_state.criteriaDetails:
         rows = []
-        for ex in ctx.exceedances:
+        for detail in project_state.criteriaDetails:
+            if not detail.name or not detail.thresholds:
+                continue
+            threshold_bits = []
+            for threshold in detail.thresholds:
+                if threshold.analyte and threshold.value is not None:
+                    threshold_bits.append(
+                        f"{threshold.analyte}={threshold.value}"
+                        f"{' ' + threshold.unit if threshold.unit else ''}"
+                    )
+            if threshold_bits:
+                rows.append(f"- {detail.name}: {', '.join(threshold_bits)}")
+        if rows:
+            sections.append("## Criteria Details\n" + "\n".join(rows))
+
+    if project_state and project_state.exceedanceSummary:
+        s = project_state.exceedanceSummary
+        parts = []
+        if s.totalExceedances is not None:
+            parts.append(f"Total exceedances: {s.totalExceedances}")
+        if s.exceededCriteria:
+            parts.append(f"Exceeded criteria: {', '.join(s.exceededCriteria)}")
+        if s.affectedAnalytes:
+            parts.append(f"Affected analytes: {', '.join(s.affectedAnalytes)}")
+        if s.affectedSamples:
+            parts.append(f"Affected samples: {', '.join(s.affectedSamples)}")
+        if s.hotspotCount is not None:
+            parts.append(f"Hotspots: {s.hotspotCount}")
+        if parts:
+            sections.append("## Exceedance Summary\n" + "\n".join(parts))
+
+    if project_state and project_state.exceedances:
+        rows = []
+        for ex in project_state.exceedances:
             if ex.analyte and ex.value is not None:
                 row = f"- {ex.analyte}"
                 if ex.sampleCode:
@@ -243,58 +255,71 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                 row += f": {ex.value}"
                 if ex.unit:
                     row += f" {ex.unit}"
-                if ex.criterionValue is not None and ex.criterion:
-                    row += f" (limit {ex.criterion}={ex.criterionValue}"
-                    if ex.exceedanceFactor is not None:
-                        row += f", {ex.exceedanceFactor}x"
-                    row += ")"
+                if ex.criterion:
+                    row += f" against {ex.criterion}"
                 rows.append(row)
         if rows:
             sections.append("## Exceedances\n" + "\n".join(rows))
 
-    # Retrieved sample rows
-    if ctx.retrievedRows:
+    if project_state and project_state.projectResults:
         rows = []
-        for r in ctx.retrievedRows:
-            if r.sampleCode:
-                header = r.sampleCode
-                if r.depth:
-                    header += f" ({r.depth})"
-                if r.collectionDate:
-                    header += f" [{r.collectionDate}]"
+        for result in project_state.projectResults[:20]:
+            if result.sampleCode:
+                header = result.sampleCode
+                if result.depth:
+                    header += f" ({result.depth})"
                 vals = []
-                if r.analyteValues:
-                    for av in r.analyteValues:
-                        if av.analyte and av.value is not None:
+                if result.analyteValues:
+                    for analyte_value in result.analyteValues[:20]:
+                        if analyte_value.analyte and analyte_value.value is not None:
                             vals.append(
-                                f"{av.analyte}={av.value}{' ' + av.unit if av.unit else ''}"
+                                f"{analyte_value.analyte}={analyte_value.value}"
+                                f"{' ' + analyte_value.unit if analyte_value.unit else ''}"
                             )
                 row = f"- {header}"
                 if vals:
                     row += ": " + ", ".join(vals)
                 rows.append(row)
         if rows:
-            sections.append("## Retrieved Sample Data\n" + "\n".join(rows))
+            sections.append("## Project Results\n" + "\n".join(rows))
 
-    # Retrieval hints (compact)
-    if ctx.retrieval:
+    if project_state and project_state.fieldSummary:
+        f = project_state.fieldSummary
         parts = []
-        if ctx.retrieval.matchedAnalytes:
-            parts.append(
-                f"Matched analytes: {', '.join(ctx.retrieval.matchedAnalytes)}"
-            )
-        if ctx.retrieval.matchedSampleCodes:
-            parts.append(
-                f"Matched samples: {', '.join(ctx.retrieval.matchedSampleCodes)}"
-            )
+        if f.hasFieldData is not None:
+            parts.append(f"Has field data: {'Yes' if f.hasFieldData else 'No'}")
+        if f.sessionCount is not None:
+            parts.append(f"Field sessions: {f.sessionCount}")
+        if f.boreholeCount is not None:
+            parts.append(f"Boreholes: {f.boreholeCount}")
+        if f.fieldSampleCount is not None:
+            parts.append(f"Field samples: {f.fieldSampleCount}")
+        if f.lithologyLogCount is not None:
+            parts.append(f"Lithology logs: {f.lithologyLogCount}")
+        if f.latestSessionDate:
+            parts.append(f"Latest session: {f.latestSessionDate}")
+        if f.sampleTypes:
+            parts.append(f"Sample types: {', '.join(f.sampleTypes)}")
+        if f.depthRange:
+            parts.append(f"Depth range: {f.depthRange}")
+        if f.hasGpsData is not None:
+            parts.append(f"GPS data: {'Yes' if f.hasGpsData else 'No'}")
         if parts:
-            sections.append("## Retrieval Hints\n" + "\n".join(parts))
+            sections.append("## Field Summary\n" + "\n".join(parts))
 
-    if not sections:
-        return ""
+    if retrieval_context:
+        parts = []
+        if retrieval_context.matchedAnalytes:
+            parts.append(
+                f"Matched analytes: {', '.join(retrieval_context.matchedAnalytes)}"
+            )
+        if retrieval_context.matchedSampleCodes:
+            parts.append(
+                f"Matched samples: {', '.join(retrieval_context.matchedSampleCodes)}"
+            )
+        if retrieval_context.retrievedRows:
+            parts.append(f"Retrieved rows: {len(retrieval_context.retrievedRows)}")
+        if parts:
+            sections.append("## Retrieval Context\n" + "\n".join(parts))
 
-    header = (
-        "You have access to the following workspace context from the user's "
-        "environmental data project. Use it to ground your answer.\n\n"
-    )
-    return header + "\n\n".join(sections)
+    return "\n\n".join(sections)
