@@ -230,48 +230,7 @@ async def query(req: QueryRequest):
         else:
             enhanced_query = req.question
 
-        kb_answer = await rag.aquery(enhanced_query, mode=req.mode)
-
-        # ── Step 2: Synthesise with workspace context ─────────────
-        # If workspace context was provided, do a second LLM call that
-        # combines the KB answer with the project-specific data.
-        if context_used and grounding:
-            synthesis_prompt = (
-                f"The user asked: {req.question}\n\n"
-                f"## SOURCE 1: Knowledge Base (regulatory reference data)\n{kb_answer}\n\n"
-                f"## SOURCE 2: Workspace Context (the user's actual project data)\n{grounding}\n\n"
-                "INSTRUCTIONS:\n"
-                "- Answer the user's question using ONLY facts explicitly present in Source 1 or Source 2 above.\n"
-                "- NEVER invent sample codes, analyte values, or numbers that do not appear in the sources.\n"
-                "- When citing project-specific data (sample results, exceedances), use ONLY Source 2.\n"
-                "- When citing regulatory criteria or guidelines, use ONLY Source 1.\n"
-                "- If the data needed to answer the question is not in either source, say so clearly.\n"
-                "- Label where each piece of information comes from when it matters."
-            )
-            result = await openai_complete_if_cache(
-                LLM_MODEL,
-                synthesis_prompt,
-                system_prompt=ALFIE_SYSTEM_PROMPT,
-                api_key=os.getenv("OPENAI_API_KEY"),
-            )
-        else:
-            # No workspace context — rewrite KB answer with Alfie's voice
-            synthesis_prompt = (
-                f"The user asked: {req.question}\n\n"
-                f"## Knowledge Base Answer\n{kb_answer}\n\n"
-                "INSTRUCTIONS:\n"
-                "- Rewrite this answer in your own voice.\n"
-                "- Keep ALL facts, values, references, and numbers exactly as they appear above.\n"
-                "- Do NOT add any data, values, or sample codes that are not in the knowledge base answer.\n"
-                "- Do NOT remove any information.\n"
-                "- If the knowledge base answer says it doesn't have enough information, say that too."
-            )
-            result = await openai_complete_if_cache(
-                LLM_MODEL,
-                synthesis_prompt,
-                system_prompt=ALFIE_SYSTEM_PROMPT,
-                api_key=os.getenv("OPENAI_API_KEY"),
-            )
+        result = await rag.aquery(enhanced_query, mode=req.mode)
 
         # Store in session history
         history.append({"role": "user", "content": req.question})
