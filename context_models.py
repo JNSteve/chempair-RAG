@@ -14,18 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── Guardrail constants ─────────────────────────────────────────
-MAX_EXCEEDANCES = 8
-MAX_RETRIEVED_ROWS = 8
-MAX_ANALYTE_VALUES_PER_ROW = 6
-MAX_CONVERSATION_MESSAGES = 8
-MAX_MATCHED_ANALYTES = 12
-MAX_MATCHED_SAMPLE_CODES = 12
-MAX_QUESTION_TOKENS = 24
-MAX_REGULATIONS = 12
-MAX_RELEVANT_DETAILS = 6
-MAX_THRESHOLDS_PER_DETAIL = 6
-MAX_SAMPLE_TYPES = 12
-MAX_CONTEXT_PAYLOAD_BYTES = 16 * 1024  # 16 KB
+# Per-field limits removed — step 1 (context extraction) handles filtering.
+# Only the overall payload size limit is enforced at the API layer.
+MAX_CONVERSATION_MESSAGES = 20
+MAX_CONTEXT_PAYLOAD_BYTES = 128 * 1024  # 128 KB
 
 
 # ── Nested models ───────────────────────────────────────────────
@@ -46,15 +38,9 @@ class ProjectInfo(BaseModel):
 class RetrievalHints(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    matchedAnalytes: Optional[List[str]] = Field(
-        default=None, max_length=MAX_MATCHED_ANALYTES
-    )
-    matchedSampleCodes: Optional[List[str]] = Field(
-        default=None, max_length=MAX_MATCHED_SAMPLE_CODES
-    )
-    questionTokens: Optional[List[str]] = Field(
-        default=None, max_length=MAX_QUESTION_TOKENS
-    )
+    matchedAnalytes: Optional[List[str]] = None
+    matchedSampleCodes: Optional[List[str]] = None
+    questionTokens: Optional[List[str]] = None
 
 
 class CriterionThreshold(BaseModel):
@@ -69,9 +55,7 @@ class RelevantDetail(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     name: Optional[str] = None
-    thresholds: Optional[List[CriterionThreshold]] = Field(
-        default=None, max_length=MAX_THRESHOLDS_PER_DETAIL
-    )
+    thresholds: Optional[List[CriterionThreshold]] = None
 
 
 class CriteriaInfo(BaseModel):
@@ -80,12 +64,8 @@ class CriteriaInfo(BaseModel):
     applicableCriteria: Optional[str] = None
     landUse: Optional[str] = None
     state: Optional[str] = None
-    regulations: Optional[List[str]] = Field(
-        default=None, max_length=MAX_REGULATIONS
-    )
-    relevantDetails: Optional[List[RelevantDetail]] = Field(
-        default=None, max_length=MAX_RELEVANT_DETAILS
-    )
+    regulations: Optional[List[str]] = None
+    relevantDetails: Optional[List[RelevantDetail]] = None
 
 
 class FieldSummary(BaseModel):
@@ -97,9 +77,7 @@ class FieldSummary(BaseModel):
     fieldSampleCount: Optional[int] = None
     lithologyLogCount: Optional[int] = None
     latestSessionDate: Optional[str] = None
-    sampleTypes: Optional[List[str]] = Field(
-        default=None, max_length=MAX_SAMPLE_TYPES
-    )
+    sampleTypes: Optional[List[str]] = None
     depthRange: Optional[str] = None
     hasGpsData: Optional[bool] = None
 
@@ -140,9 +118,7 @@ class RetrievedRow(BaseModel):
     sampleType: Optional[str] = None
     labName: Optional[str] = None
     coordinates: Optional[Coordinates] = None
-    analyteValues: Optional[List[AnalyteValue]] = Field(
-        default=None, max_length=MAX_ANALYTE_VALUES_PER_ROW
-    )
+    analyteValues: Optional[List[AnalyteValue]] = None
 
 
 class ConversationMessage(BaseModel):
@@ -168,12 +144,8 @@ class WorkspaceContext(BaseModel):
     retrieval: Optional[RetrievalHints] = None
     criteria: Optional[CriteriaInfo] = None
     fieldSummary: Optional[FieldSummary] = None
-    exceedances: Optional[List[Exceedance]] = Field(
-        default=None, max_length=MAX_EXCEEDANCES
-    )
-    retrievedRows: Optional[List[RetrievedRow]] = Field(
-        default=None, max_length=MAX_RETRIEVED_ROWS
-    )
+    exceedances: Optional[List[Exceedance]] = None
+    retrievedRows: Optional[List[RetrievedRow]] = None
     conversation: Optional[List[ConversationMessage]] = Field(
         default=None, max_length=MAX_CONVERSATION_MESSAGES
     )
@@ -224,10 +196,10 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
         if c.regulations:
             parts.append(f"Regulations: {', '.join(c.regulations)}")
         if c.relevantDetails:
-            for detail in c.relevantDetails[:20]:  # cap display
+            for detail in c.relevantDetails:
                 if detail.name and detail.thresholds:
                     thresh_strs = []
-                    for t in detail.thresholds[:20]:
+                    for t in detail.thresholds:
                         if t.analyte and t.value is not None:
                             thresh_strs.append(
                                 f"{t.analyte}: {t.value} {t.unit or ''}"
@@ -263,7 +235,7 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
     # Exceedances
     if ctx.exceedances:
         rows = []
-        for ex in ctx.exceedances[:50]:  # cap display for prompt size
+        for ex in ctx.exceedances:
             if ex.analyte and ex.value is not None:
                 row = f"- {ex.analyte}"
                 if ex.sampleCode:
@@ -283,7 +255,7 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
     # Retrieved sample rows
     if ctx.retrievedRows:
         rows = []
-        for r in ctx.retrievedRows[:30]:  # cap display for prompt size
+        for r in ctx.retrievedRows:
             if r.sampleCode:
                 header = r.sampleCode
                 if r.depth:
@@ -292,7 +264,7 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                     header += f" [{r.collectionDate}]"
                 vals = []
                 if r.analyteValues:
-                    for av in r.analyteValues[:20]:
+                    for av in r.analyteValues:
                         if av.analyte and av.value is not None:
                             vals.append(
                                 f"{av.analyte}={av.value}{' ' + av.unit if av.unit else ''}"
@@ -309,11 +281,11 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
         parts = []
         if ctx.retrieval.matchedAnalytes:
             parts.append(
-                f"Matched analytes: {', '.join(ctx.retrieval.matchedAnalytes[:30])}"
+                f"Matched analytes: {', '.join(ctx.retrieval.matchedAnalytes)}"
             )
         if ctx.retrieval.matchedSampleCodes:
             parts.append(
-                f"Matched samples: {', '.join(ctx.retrieval.matchedSampleCodes[:30])}"
+                f"Matched samples: {', '.join(ctx.retrieval.matchedSampleCodes)}"
             )
         if parts:
             sections.append("## Retrieval Hints\n" + "\n".join(parts))
