@@ -24,7 +24,6 @@ from context_models import (
     MAX_CONTEXT_PAYLOAD_BYTES,
 )
 
-from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
 
@@ -224,12 +223,11 @@ async def query(req: QueryRequest):
         if context_used and grounding:
             user_prompt_parts.append(grounding)
 
-        query_param = QueryParam(
+        result = await rag.aquery(
+            enhanced_query,
             mode=req.mode,
             user_prompt="\n\n".join(user_prompt_parts),
         )
-
-        result = await rag.aquery(enhanced_query, param=query_param)
 
         # Store in session history
         history.append({"role": "user", "content": req.question})
