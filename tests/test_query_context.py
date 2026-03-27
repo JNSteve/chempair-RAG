@@ -151,6 +151,42 @@ def _full_context() -> dict:
     }
 
 
+def _benzene_hsl_context() -> dict:
+    return {
+        "schemaVersion": 3,
+        "generatedAtIso": "2026-03-27T10:00:00.000Z",
+        "projectState": {
+            "project": {
+                "projectName": "Project Benzene",
+                "projectId": "project-benzene",
+                "projectType": "soil",
+            },
+            "selectedCriteria": {
+                "applicableCriteria": "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)",
+                "regulations": ["NEPM 2013"],
+                "landUse": "Low Density Residential",
+                "state": "QLD",
+                "criteriaNames": [
+                    "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)"
+                ],
+                "criteriaCount": 1,
+            },
+            "criteriaDetails": [
+                {
+                    "name": "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)",
+                    "thresholds": [
+                        {"analyte": "Benzene", "value": 0.5, "unit": "mg/kg"}
+                    ],
+                }
+            ],
+        },
+        "retrievalContext": {
+            "matchedAnalytes": ["Benzene"],
+            "questionTokens": ["benzene", "hsl-a"],
+        },
+    }
+
+
 @pytest.fixture()
 def client():
     with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
@@ -418,6 +454,28 @@ class TestSessionBehaviour:
 
 
 class TestRoutingBehaviour:
+    def test_direct_criterion_lookup_uses_project_context_threshold(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": (
+                    "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m) "
+                    "- whats the benzene exceedance value?"
+                ),
+                "context": _benzene_hsl_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        answer = response.json()["answer"]
+        assert "0.5 mg/kg" in answer
+        assert "0.6 mg/kg" not in answer
+        assert "0.1 mg/kg" not in answer
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_not_awaited()
+
     def test_project_only_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
         mock_openai.side_effect = [
@@ -718,4 +776,3 @@ class TestContextModelValidation:
                     for index in range(21)
                 ]
             )
-

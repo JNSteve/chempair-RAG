@@ -7,6 +7,7 @@ Supports conversational sessions so users can refine questions.
 import json
 import logging
 import os
+import re
 import time
 import uuid
 
@@ -40,6 +41,8 @@ ALFIE_USER_PROMPT = (
     "Give a direct answer first. Write like a concise consultant email. "
     "Do not use decorative markdown, bold text, or long bullet lists. "
     "Do not invent values, criteria, or sample codes. "
+    "When project-applied criteria are supplied, treat them as authoritative over any general reference values. "
+    "Keep soil criteria distinct from vapour criteria and other media or pathways. "
     "If notable analyte or sample issues exist, keep each issue to one sentence where practical. "
     "Keep responses to short structured prose."
 )
@@ -50,6 +53,9 @@ PROJECT_ONLY_ANSWER_SYSTEM = (
     "Do not mention the knowledge base, RAG, prompts, or internal routing.\n"
     "Be concise, practical, and human. Use Australian professional English.\n"
     "Do not invent values, criteria, or sample codes.\n"
+    "Treat the supplied selected criteria, criteria details, and exceedance data as authoritative.\n"
+    "For criterion or exceedance-value questions, prefer the project criterionValue first, then the matching threshold under the selected criterion.\n"
+    "Do not substitute a threshold from a different medium, pathway, depth band, or land use.\n"
     "If the project context does not contain the answer, say so plainly.\n"
     "Prefer short paragraphs. Avoid decorative markdown and unnecessary bullet points."
 )
@@ -63,10 +69,12 @@ CONTEXT_EXTRACTION_SYSTEM = (
     "- project_only: the question can be answered directly from the project data without the knowledge base.\n"
     "- blended: the question needs both project data and knowledge-base interpretation.\n\n"
     "Requirements:\n"
+    "- If the user is asking for an applied criterion, threshold, guideline value, or exceedance value that is already present in selected criteria, criteria details, exceedances, or retrieved project rows, route as project_only.\n"
     "- Extract only information that is actually present in the current workspace.\n"
     "- Filter to data relevant to the user's question.\n"
     "- Do not infer unsupported facts.\n"
     "- Preserve exact sample IDs, analyte names, units, criteria names, and project metadata where available.\n"
+    "- Keep soil, soil vapour, groundwater, and other media/pathways distinct. Never merge thresholds across different media/pathways.\n"
     "- Omit sections that are unavailable or irrelevant to the question.\n"
     "- Do not write a narrative answer.\n"
     "- Do not include markdown.\n"
@@ -82,6 +90,25 @@ CONTEXT_EXTRACTION_SYSTEM = (
 )
 
 sessions: dict[str, dict] = {}
+CRITERION_LOOKUP_TERMS = (
+    "criterion",
+    "criteria",
+    "guideline",
+    "guidelines",
+    "threshold",
+    "screening",
+    "hsl",
+    "hil",
+)
+CRITERION_VALUE_TERMS = (
+    "value",
+    "limit",
+    "exceedance",
+    "screening level",
+    "criterion value",
+    "guideline value",
+    "threshold",
+)
 
 
 def get_or_create_session(session_id: str | None) -> tuple[str, list[dict]]:
@@ -190,6 +217,175 @@ def _has_usable_context(ctx: WorkspaceContext) -> bool:
 
 def _build_context_json(ctx: WorkspaceContext) -> str:
     return json.dumps(ctx.model_dump(exclude_none=True), ensure_ascii=False, indent=2)
+
+
+def _normalise_text(value: str | None) -> str:
+    if not value:
+        return ""
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
+def _format_scalar(value) -> str:
+    if value is None:
+        return "unknown"
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return format(value, "g")
+
+    text = str(value).strip()
+    try:
+        number = float(text.replace(",", ""))
+    except ValueError:
+        return text
+
+    if number.is_integer():
+        return str(int(number))
+    return format(number, "g")
+
+
+def _format_value(value, unit: str | None = None) -> str:
+    rendered = _format_scalar(value)
+    return f"{rendered} {unit}".strip() if unit else rendered
+
+
+def _coerce_float(value) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).strip().replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _question_targets_criterion_lookup(question: str) -> bool:
+    normalised = _normalise_text(question)
+    if normalised.startswith("how ") or normalised.startswith("why "):
+        return False
+    return any(term in normalised for term in CRITERION_LOOKUP_TERMS) and any(
+        term in normalised for term in CRITERION_VALUE_TERMS
+    )
+
+
+def _iter_thresholds(ctx: WorkspaceContext):
+    project_state = ctx.projectState
+    if not project_state or not project_state.criteriaDetails:
+        return
+
+    for detail in project_state.criteriaDetails:
+        if not detail.thresholds:
+            continue
+        for threshold in detail.thresholds:
+            yield detail, threshold
+
+
+def _find_question_analyte(question: str, ctx: WorkspaceContext) -> str | None:
+    candidates: list[str] = []
+    question_normalised = _normalise_text(question)
+
+    if ctx.retrievalContext and ctx.retrievalContext.matchedAnalytes:
+        candidates.extend(
+            analyte for analyte in ctx.retrievalContext.matchedAnalytes if analyte
+        )
+
+    for _, threshold in _iter_thresholds(ctx):
+        if threshold.analyte:
+            candidates.append(threshold.analyte)
+
+    project_state = ctx.projectState
+    if project_state and project_state.exceedances:
+        candidates.extend(ex.analyte for ex in project_state.exceedances if ex.analyte)
+    if project_state and project_state.projectResults:
+        for row in project_state.projectResults:
+            if not row.analyteValues:
+                continue
+            candidates.extend(
+                item.analyte for item in row.analyteValues if item.analyte
+            )
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for candidate in candidates:
+        key = _normalise_text(candidate)
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(candidate)
+
+    for candidate in sorted(deduped, key=len, reverse=True):
+        if _normalise_text(candidate) in question_normalised:
+            return candidate
+
+    return deduped[0] if deduped else None
+
+
+def _selected_criterion_names(ctx: WorkspaceContext) -> list[str]:
+    project_state = ctx.projectState
+    if not project_state or not project_state.selectedCriteria:
+        return []
+
+    selected = project_state.selectedCriteria
+    names: list[str] = []
+    if selected.criteriaNames:
+        names.extend(name for name in selected.criteriaNames if name)
+    if selected.applicableCriteria:
+        names.append(selected.applicableCriteria)
+    return names
+
+
+def _find_matching_threshold(question: str, ctx: WorkspaceContext, analyte: str):
+    analyte_key = _normalise_text(analyte)
+    question_key = _normalise_text(question)
+    selected_names = _selected_criterion_names(ctx)
+    selected_keys = {_normalise_text(name) for name in selected_names if name}
+
+    prioritised = []
+    fallback = []
+    for detail, threshold in _iter_thresholds(ctx):
+        if _normalise_text(threshold.analyte) != analyte_key:
+            continue
+
+        detail_name = detail.name or ""
+        detail_key = _normalise_text(detail_name)
+        if detail_key and detail_key in question_key:
+            prioritised.insert(0, (detail, threshold))
+        elif detail_key and detail_key in selected_keys:
+            prioritised.append((detail, threshold))
+        else:
+            fallback.append((detail, threshold))
+
+    if prioritised:
+        return prioritised[0]
+    if len(fallback) == 1:
+        return fallback[0]
+    return None
+
+
+def _try_answer_direct_criterion_lookup(question: str, ctx: WorkspaceContext) -> str | None:
+    if not _question_targets_criterion_lookup(question):
+        return None
+
+    project_state = ctx.projectState
+    if not project_state or not project_state.criteriaDetails:
+        return None
+
+    analyte = _find_question_analyte(question, ctx)
+    if not analyte:
+        return None
+    if _normalise_text(analyte) not in _normalise_text(question):
+        return None
+
+    matched = _find_matching_threshold(question, ctx, analyte)
+    if not matched:
+        return None
+
+    detail, threshold = matched
+    criterion_name = detail.name or (_selected_criterion_names(ctx)[:1] or ["the selected criterion"])[0]
+    criterion_value_text = _format_value(threshold.value, threshold.unit)
+    return f"The applied {analyte} criterion for {criterion_name} is {criterion_value_text}."
 
 
 def _build_blended_rag_query(question: str, filtered: dict) -> str:
@@ -335,6 +531,13 @@ async def query(req: QueryRequest):
         result = None
 
         if context_used:
+            direct_context_answer = _try_answer_direct_criterion_lookup(
+                req.question, req.context
+            )
+            if direct_context_answer:
+                result = direct_context_answer
+
+        if context_used and result is None:
             extraction_prompt = (
                 f"User question: {req.question}\n\n"
                 f"Workspace context JSON:\n{_build_context_json(req.context)}"
