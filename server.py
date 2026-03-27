@@ -24,6 +24,7 @@ from context_models import (
     MAX_CONTEXT_PAYLOAD_BYTES,
 )
 
+from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
 
@@ -41,21 +42,13 @@ MAX_EXCHANGES = 3  # auto-reset session after 3 exchanges to avoid context pollu
 
 logger = logging.getLogger("chempair.query")
 
-# ---- Default system prompt ----
-ALFIE_SYSTEM_PROMPT = (
-    "You are Alfie, an environmental data assistant built by Chempair. "
-    "You help environmental consultants analyse site contamination data, "
-    "lab results, regulatory criteria, and field observations. "
+# ---- Additional instructions injected via QueryParam.user_prompt ----
+# Kept lightweight so it doesn't compete with KB context for token budget.
+# LightRAG's own "You are an expert AI assistant" role stays intact.
+ADDITIONAL_INSTRUCTIONS = (
     "Always respond in Australian English. "
-    "Be concise, professional, and practical. "
-    "Never refer to yourself as a RAG, a language model, or an AI system. "
-    "Your name is Alfie — use it if asked who you are. "
-    "If you cannot find a specific value but you know which table or section "
-    "it would be in, say so plainly — for example: "
-    "'I couldn't find the exact value for o-Xylene, but it should be in "
-    "Table 1B(6) of Schedule B1.' "
-    "Never hedge or pad your answer — if you don't have it, say so directly "
-    "and point the user to where they can look it up."
+    "If asked who you are, say your name is Alfie. "
+    "Never refer to yourself as a RAG, a language model, or an AI system."
 )
 
 # ---- Session storage ----
@@ -213,7 +206,7 @@ async def query(req: QueryRequest):
         logger.info("context_absent session=%s", session_id)
 
     try:
-        # ── Step 1: Retrieve from knowledge base (clean query) ────
+        # Build query from chat history
         if history:
             context_parts = []
             for msg in history[-6:]:
@@ -226,43 +219,17 @@ async def query(req: QueryRequest):
         else:
             enhanced_query = req.question
 
-        kb_answer = await rag.aquery(enhanced_query, mode=req.mode)
-
-        # ── Step 2: Synthesise with workspace context ─────────────
-        # If workspace context was provided, do a second LLM call that
-        # combines the KB answer with the project-specific data.
+        # Build user_prompt: Alfie instructions + workspace context (if present)
+        user_prompt_parts = [ADDITIONAL_INSTRUCTIONS]
         if context_used and grounding:
-            synthesis_prompt = (
-                f"The user asked: {req.question}\n\n"
-                f"## Knowledge Base Answer\n{kb_answer}\n\n"
-                f"## Workspace Context (user's current project data)\n{grounding}\n\n"
-                "Using BOTH the knowledge base answer AND the workspace context, "
-                "provide a single, integrated answer to the user's question. "
-                "Where specific values appear in the workspace context (e.g. sample results, "
-                "exceedances), use them. Where regulatory thresholds or background information "
-                "appear in the knowledge base answer, use those. "
-                "Combine both sources into one clear, practical response."
-            )
-            result = await openai_complete_if_cache(
-                LLM_MODEL,
-                synthesis_prompt,
-                system_prompt=ALFIE_SYSTEM_PROMPT,
-                api_key=os.getenv("OPENAI_API_KEY"),
-            )
-        else:
-            # No workspace context — still run through Alfie for tone/language
-            synthesis_prompt = (
-                f"The user asked: {req.question}\n\n"
-                f"## Knowledge Base Answer\n{kb_answer}\n\n"
-                "Rewrite this answer in your own voice. Keep all facts, values, "
-                "and references exactly as they are. Do not add or remove information."
-            )
-            result = await openai_complete_if_cache(
-                LLM_MODEL,
-                synthesis_prompt,
-                system_prompt=ALFIE_SYSTEM_PROMPT,
-                api_key=os.getenv("OPENAI_API_KEY"),
-            )
+            user_prompt_parts.append(grounding)
+
+        query_param = QueryParam(
+            mode=req.mode,
+            user_prompt="\n\n".join(user_prompt_parts),
+        )
+
+        result = await rag.aquery(enhanced_query, param=query_param)
 
         # Store in session history
         history.append({"role": "user", "content": req.question})
