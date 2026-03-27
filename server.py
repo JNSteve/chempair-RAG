@@ -24,6 +24,7 @@ from context_models import (
     MAX_CONTEXT_PAYLOAD_BYTES,
 )
 
+from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
 
@@ -41,25 +42,13 @@ MAX_EXCHANGES = 3  # auto-reset session after 3 exchanges to avoid context pollu
 
 logger = logging.getLogger("chempair.query")
 
-# ---- Default system prompt ----
-ALFIE_SYSTEM_PROMPT = (
-    "You are Alfie, an environmental data assistant built by Chempair. "
-    "You help environmental consultants analyse site contamination data, "
-    "lab results, regulatory criteria, and field observations. "
+# ---- Additional instructions injected via QueryParam.user_prompt ----
+# Kept lightweight so it doesn't compete with KB context for token budget.
+# LightRAG's own "You are an expert AI assistant" role stays intact.
+ADDITIONAL_INSTRUCTIONS = (
     "Always respond in Australian English. "
-    "Be concise, professional, and practical. "
-    "Never refer to yourself as a RAG, a language model, or an AI system. "
-    "Your name is Alfie — use it if asked who you are.\n\n"
-    "CRITICAL RULES:\n"
-    "- NEVER invent, guess, or fabricate sample codes, analyte values, or numbers. "
-    "If a value is not explicitly provided in the inputs below, do not state it.\n"
-    "- Clearly distinguish between regulatory reference data (from the knowledge base) "
-    "and site-specific project data (from the workspace context).\n"
-    "- If the user asks about their project data and it is not in the workspace context, "
-    "say 'That data isn't available in the current workspace — check your lab report.'\n"
-    "- If you cannot find a specific regulatory value but know which table it would be in, "
-    "say so plainly, e.g. 'Check Table 1B(6) of Schedule B1.'\n"
-    "- Never pad your answer. If you don't have it, say so directly."
+    "If asked who you are, say your name is Alfie. "
+    "Never refer to yourself as a RAG, a language model, or an AI system."
 )
 
 # ---- Session storage ----
@@ -217,7 +206,7 @@ async def query(req: QueryRequest):
         logger.info("context_absent session=%s", session_id)
 
     try:
-        # ── Step 1: Retrieve from knowledge base (clean query) ────
+        # Build query from chat history
         if history:
             context_parts = []
             for msg in history[-6:]:
@@ -230,7 +219,17 @@ async def query(req: QueryRequest):
         else:
             enhanced_query = req.question
 
-        result = await rag.aquery(enhanced_query, mode=req.mode)
+        # Build user_prompt: Alfie instructions + workspace context (if present)
+        user_prompt_parts = [ADDITIONAL_INSTRUCTIONS]
+        if context_used and grounding:
+            user_prompt_parts.append(grounding)
+
+        query_param = QueryParam(
+            mode=req.mode,
+            user_prompt="\n\n".join(user_prompt_parts),
+        )
+
+        result = await rag.aquery(enhanced_query, param=query_param)
 
         # Store in session history
         history.append({"role": "user", "content": req.question})
