@@ -8,8 +8,6 @@ from context_models import (
     MAX_CONTEXT_PAYLOAD_BYTES,
     AnalyteValue,
     ConversationMessage,
-    CriteriaDetail,
-    CriterionThreshold,
     Exceedance,
     ExceedanceSummary,
     FieldSummary,
@@ -21,6 +19,35 @@ from context_models import (
     WorkspaceContext,
     build_grounding_prompt,
 )
+
+
+def _sample_grounding_payload() -> dict:
+    return {
+        "status": "success",
+        "message": "Query executed successfully",
+        "data": {
+            "entities": [],
+            "relationships": [],
+            "references": [
+                {
+                    "reference_id": "ref-1",
+                    "file_path": "/kb/NEPM_2013.pdf",
+                }
+            ],
+            "chunks": [
+                {
+                    "reference_id": "ref-1",
+                    "file_path": "/kb/NEPM_2013.pdf",
+                    "chunk_id": "page_123_chunk_1",
+                    "content": (
+                        "TRH C6-C10 and related hydrocarbon fractions should be assessed "
+                        "against the selected land use criteria in the NEPM."
+                    ),
+                }
+            ],
+        },
+        "metadata": {"mode": "hybrid"},
+    }
 
 
 def _minimal_context() -> dict:
@@ -151,6 +178,26 @@ def _full_context() -> dict:
     }
 
 
+def _flat_context() -> dict:
+    context = _full_context()
+    return {
+        "schemaVersion": context["schemaVersion"],
+        "generatedAtIso": context["generatedAtIso"],
+        "project": context["projectState"]["project"],
+        "selectedCriteria": context["projectState"]["selectedCriteria"],
+        "criteriaDetails": context["projectState"]["criteriaDetails"],
+        "exceedanceSummary": context["projectState"]["exceedanceSummary"],
+        "exceedances": context["projectState"]["exceedances"],
+        "projectResults": context["projectState"]["projectResults"],
+        "fieldSummary": context["projectState"]["fieldSummary"],
+        "matchedAnalytes": context["retrievalContext"]["matchedAnalytes"],
+        "matchedSampleCodes": context["retrievalContext"]["matchedSampleCodes"],
+        "questionTokens": context["retrievalContext"]["questionTokens"],
+        "retrievedRows": context["retrievalContext"]["retrievedRows"],
+        "conversation": context["conversation"],
+    }
+
+
 def _benzene_hsl_context() -> dict:
     return {
         "schemaVersion": 3,
@@ -187,6 +234,102 @@ def _benzene_hsl_context() -> dict:
     }
 
 
+def _trh_context() -> dict:
+    return {
+        "schemaVersion": 3,
+        "generatedAtIso": "2026-03-27T10:00:00.000Z",
+        "projectState": {
+            "project": {
+                "projectName": "Hydrocarbon Project",
+                "projectId": "project-trh",
+                "siteName": "Depot Site",
+                "projectType": "soil",
+                "labReportNumber": "LAB-TRH",
+            },
+            "selectedCriteria": {
+                "applicableCriteria": "NEPM 2013 HSL-A",
+                "regulations": ["NEPM 2013"],
+                "landUse": "Commercial",
+                "state": "QLD",
+                "criteriaNames": ["TRH C6-C10 less BTEX", "F1"],
+                "criteriaCount": 2,
+            },
+            "criteriaDetails": [
+                {
+                    "name": "NEPM 2013 HSL-A",
+                    "thresholds": [
+                        {"analyte": "TRH C6-C10", "value": 100, "unit": "mg/kg"},
+                        {
+                            "analyte": "TRH C6-C10 less BTEX",
+                            "value": 90,
+                            "unit": "mg/kg",
+                        },
+                        {"analyte": "BTEX", "value": 15, "unit": "mg/kg"},
+                        {"analyte": "F1", "value": 75, "unit": "mg/kg"},
+                    ],
+                }
+            ],
+            "exceedanceSummary": {
+                "totalExceedances": 2,
+                "affectedSamples": ["BH-TRH-01"],
+                "affectedAnalytes": ["TRH C6-C10", "TRH C6-C10 less BTEX"],
+                "exceededCriteria": ["NEPM 2013 HSL-A"],
+                "hotspotCount": 1,
+            },
+            "exceedances": [
+                {
+                    "analyte": "TRH C6-C10",
+                    "sampleCode": "BH-TRH-01",
+                    "criterion": "NEPM 2013 HSL-A",
+                    "value": 380,
+                    "criterionValue": 100,
+                    "unit": "mg/kg",
+                }
+            ],
+            "projectResults": [
+                {
+                    "sampleCode": "BH-TRH-01",
+                    "depth": "0-0.5m",
+                    "analyteValues": [
+                        {"analyte": "TRH C6-C10", "value": 380, "unit": "mg/kg"},
+                        {
+                            "analyte": "TRH C6-C10 less BTEX",
+                            "value": 320,
+                            "unit": "mg/kg",
+                        },
+                        {"analyte": "BTEX", "value": 10, "unit": "mg/kg"},
+                        {"analyte": "F1", "value": 90, "unit": "mg/kg"},
+                    ],
+                }
+            ],
+        },
+        "retrievalContext": {
+            "matchedAnalytes": [
+                "TRH C6-C10",
+                "TRH C6-C10 less BTEX",
+                "BTEX",
+                "F1",
+            ],
+            "matchedSampleCodes": ["BH-TRH-01"],
+            "questionTokens": ["trh", "contamination"],
+            "retrievedRows": [
+                {
+                    "sampleCode": "BH-TRH-01",
+                    "depth": "0-0.5m",
+                    "analyteValues": [
+                        {"analyte": "TRH C6-C10", "value": 380, "unit": "mg/kg"},
+                        {
+                            "analyte": "TRH C6-C10 less BTEX",
+                            "value": 320,
+                            "unit": "mg/kg",
+                        },
+                    ],
+                }
+            ],
+        },
+    }
+
+
 @pytest.fixture()
 def client():
     with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
@@ -198,6 +341,10 @@ def client():
 
         mock_rag = MagicMock()
         mock_rag.aquery = AsyncMock(return_value="mocked rag answer")
+        mock_rag.lightrag = MagicMock()
+        mock_rag.lightrag.aquery_data = AsyncMock(
+            return_value=_sample_grounding_payload()
+        )
         mock_openai = AsyncMock()
 
         server.rag = mock_rag
@@ -221,13 +368,18 @@ class TestLegacyRequest:
         body = response.json()
         assert body["answer"] == "mocked rag answer"
         assert body["context_used"] is False
+        assert body["route_used"] == "kb_only"
+        assert body["grounded"] is True
+        assert body["citations"]
+        assert body["citations"][0]["source"] == "NEPM_2013.pdf"
+        assert body["citations"][0]["locator"] == "p. 123"
         assert "session_id" in body
         mock_openai.assert_not_awaited()
-        rag_query = mock_rag.aquery.await_args.args[0]
-        assert rag_query == "What are the soil guidelines?"
+        mock_rag.aquery.assert_awaited_once()
+        assert mock_rag.aquery.await_args.args[0] == "What are the soil guidelines?"
 
     def test_legacy_with_session(self, client):
-        test_client, _, _, mock_openai = client
+        test_client, _, mock_rag, mock_openai = client
 
         first = test_client.post("/query", json={"question": "First question"})
         session_id = first.json()["session_id"]
@@ -240,96 +392,99 @@ class TestLegacyRequest:
         assert second.status_code == 200
         assert second.json()["session_id"] == session_id
         assert second.json()["context_used"] is False
+        assert second.json()["route_used"] == "kb_only"
         mock_openai.assert_not_awaited()
+        assert mock_rag.aquery.await_count == 2
 
 
-class TestContextRequest:
-    def test_minimal_context_routes_successfully(self, client):
-        test_client, _, _, mock_openai = client
-        mock_openai.return_value = json.dumps({"route": "kb_only"})
-
-        response = test_client.post(
-            "/query",
-            json={"question": "What are the exceedances?", "context": _minimal_context()},
-        )
-
-        assert response.status_code == 200
-        body = response.json()
-        assert body["context_used"] is True
-        assert body["answer"] == "mocked rag answer"
-        assert mock_openai.await_count == 1
-
-    def test_full_context_routes_successfully(self, client):
+class TestContextCompatibility:
+    def test_canonical_nested_context_request_works(self, client):
         test_client, _, mock_rag, mock_openai = client
-        mock_openai.return_value = json.dumps(
-            {
-                "route": "blended",
-                "project": {
-                    "siteName": "Ducat",
-                    "address": "1 Test Street, Brisbane QLD",
-                    "projectType": "soil",
-                    "labReportNumber": "LAB-001",
-                },
-                "selectedCriteria": {
-                    "applicableCriteria": "NEPM 2013 HIL-A",
-                    "landUse": "Residential",
-                    "state": "QLD",
-                    "criteriaNames": ["NEPM 2013 HIL-A"],
-                },
-                "criteria": {
-                    "criteriaDetails": [
-                        {
-                            "name": "NEPM 2013 HIL-A",
-                            "thresholds": [
-                                {"analyte": "Lead", "value": 300, "unit": "mg/kg"}
-                            ],
-                        }
-                    ]
-                },
-                "exceedanceSummary": {
-                    "totalExceedances": 1,
-                    "exceededCriteria": ["NEPM 2013 HIL-A"],
-                    "affectedAnalytes": ["Lead"],
-                },
-                "exceedances": [
-                    {
-                        "analyte": "Lead",
-                        "sampleCode": "BH-01",
-                        "value": 720,
-                        "unit": "mg/kg",
-                        "criterion": "NEPM 2013 HIL-A",
-                        "criterionValue": 300,
-                    }
-                ],
-                "relevantSamples": [
-                    {
-                        "sampleCode": "BH-01",
-                        "depth": "0-0.5m",
-                        "analyteValues": [
-                            {"analyte": "Lead", "value": 720, "unit": "mg/kg"}
-                        ],
-                    }
-                ],
-                "summary": "The user wants to understand the project's lead exceedance.",
-            }
-        )
+        mock_openai.side_effect = [
+            json.dumps(
+                {
+                    "route": "project_only",
+                    "project": {"projectName": "Project One"},
+                    "selectedCriteria": {"applicableCriteria": "NEPM 2013 HIL-A"},
+                }
+            ),
+            "The selected criteria are NEPM 2013 HIL-A.",
+        ]
 
         response = test_client.post(
             "/query",
             json={
-                "question": "Summarise exceedances for Lead",
+                "question": "What criteria have I selected?",
                 "context": _full_context(),
             },
         )
 
         assert response.status_code == 200
-        assert response.json()["context_used"] is True
-        rag_query = mock_rag.aquery.await_args.args[0]
-        assert "Applicable criteria: NEPM 2013 HIL-A" in rag_query
-        assert "Sample BH-01 (0-0.5m): Lead=720 mg/kg" in rag_query
+        body = response.json()
+        assert body["context_used"] is True
+        assert body["route_used"] == "project_only"
+        assert body["grounded"] is False
+        assert body["citations"] == []
+        assert body["answer"] == "The selected criteria are NEPM 2013 HIL-A."
+        mock_rag.aquery.assert_not_awaited()
+        assert mock_openai.await_count == 2
+
+    def test_flat_schema_context_normalises_for_endpoint(self, client):
+        test_client, _, mock_rag, mock_openai = client
+        mock_openai.side_effect = [
+            json.dumps(
+                {
+                    "route": "project_only",
+                    "project": {"projectName": "Project One"},
+                }
+            ),
+            "The main exceedance is Lead in BH-01.",
+        ]
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What are the main exceedances?",
+                "context": _flat_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["context_used"] is True
+        assert body["route_used"] == "project_only"
+        assert body["grounded"] is False
+        assert body["citations"] == []
+        mock_rag.aquery.assert_not_awaited()
+        assert mock_openai.await_count == 2
+
+    def test_workspace_context_model_normalises_flat_schema(self):
+        context = WorkspaceContext(**_flat_context())
+
+        assert context.projectState is not None
+        assert context.projectState.project.projectName == "Project One"
+        assert context.projectState.selectedCriteria.applicableCriteria == "NEPM 2013 HIL-A"
+        assert context.retrievalContext.matchedAnalytes == ["Lead"]
+        assert context.conversation[0].role == "user"
+
+    def test_mixed_flat_and_nested_payload_dumps_canonically(self):
+        mixed = _full_context()
+        mixed["project"] = {"siteName": "Flat Override Site"}
+        mixed["selectedCriteria"] = {"applicableCriteria": "Flat Duplicate Criteria"}
+        mixed["matchedAnalytes"] = ["Flat Duplicate Lead"]
+
+        context = WorkspaceContext(**mixed)
+        dumped = context.model_dump(exclude_none=True)
+
+        assert "project" not in dumped
+        assert "selectedCriteria" not in dumped
+        assert "matchedAnalytes" not in dumped
+        assert dumped["projectState"]["project"]["siteName"] == "Ducat"
+        assert dumped["projectState"]["selectedCriteria"]["applicableCriteria"] == "NEPM 2013 HIL-A"
+        assert dumped["retrievalContext"]["matchedAnalytes"] == ["Lead"]
 
     def test_empty_context_object_is_accepted_but_not_used(self, client):
-        test_client, _, _, mock_openai = client
+        test_client, _, mock_rag, mock_openai = client
 
         response = test_client.post(
             "/query",
@@ -338,10 +493,12 @@ class TestContextRequest:
 
         assert response.status_code == 200
         assert response.json()["context_used"] is False
+        assert response.json()["route_used"] == "kb_only"
         mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
 
     def test_context_null_is_legacy(self, client):
-        test_client, _, _, mock_openai = client
+        test_client, _, mock_rag, mock_openai = client
 
         response = test_client.post(
             "/query",
@@ -350,7 +507,234 @@ class TestContextRequest:
 
         assert response.status_code == 200
         assert response.json()["context_used"] is False
+        assert response.json()["route_used"] == "kb_only"
         mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+
+
+class TestRoutingBehaviour:
+    def test_main_exceedances_forces_project_only(self, client):
+        test_client, _, mock_rag, mock_openai = client
+        mock_openai.side_effect = [
+            json.dumps({"route": "kb_only"}),
+            "The main exceedance is Lead in BH-01.",
+        ]
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What are the main exceedances?",
+                "context": _full_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "project_only"
+        assert body["grounded"] is False
+        assert body["citations"] == []
+        mock_rag.aquery.assert_not_awaited()
+        assert mock_openai.await_count == 2
+
+    def test_generic_guidance_question_routes_kb_only(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "Tell me about the sample density guidelines",
+                "context": _full_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "kb_only"
+        assert body["grounded"] is True
+        assert body["citations"]
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        assert (
+            mock_rag.aquery.await_args.args[0]
+            == "Tell me about the sample density guidelines"
+        )
+
+    def test_unrelated_interpretive_question_stays_kb_only(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What are the disposal implications of asbestos?",
+                "context": _full_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "kb_only"
+        assert body["grounded"] is True
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        assert (
+            mock_rag.aquery.await_args.args[0]
+            == "What are the disposal implications of asbestos?"
+        )
+
+    def test_shared_regulation_query_stays_kb_only(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What does the NEPM say about asbestos?",
+                "context": _full_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "kb_only"
+        assert body["grounded"] is True
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert rag_query == "What does the NEPM say about asbestos?"
+        assert "Matched analytes:" not in rag_query
+        assert "Selected criteria:" not in rag_query
+
+    def test_trh_source_question_forces_blended(self, client):
+        test_client, _, mock_rag, mock_openai = client
+        mock_openai.return_value = json.dumps({"route": "project_only"})
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What is the TRH contamination from?",
+                "context": _trh_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "blended"
+        assert body["grounded"] is True
+        assert body["citations"]
+        mock_rag.aquery.assert_awaited_once()
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert "Matched analytes: TRH C6-C10, TRH C6-C10 less BTEX, BTEX, F1" in rag_query
+        assert "Selected criteria: TRH C6-C10 less BTEX, F1" in rag_query
+        assert "Regulations: NEPM 2013" in rag_query
+        assert "Sample BH-TRH-01 (0-0.5m)" in rag_query
+
+    def test_nepm_analyte_question_hits_rag(self, client):
+        test_client, _, mock_rag, mock_openai = client
+        mock_openai.return_value = json.dumps({"route": "kb_only"})
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What does the NEPM say about TRH C6-C10?",
+                "context": _trh_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "blended"
+        assert body["grounded"] is True
+        mock_rag.aquery.assert_awaited_once()
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert "What does the NEPM say about TRH C6-C10?" in rag_query
+        assert "Matched analytes: TRH C6-C10, TRH C6-C10 less BTEX, BTEX, F1" in rag_query
+        assert "Criterion NEPM 2013 HSL-A: TRH C6-C10=100 mg/kg" in rag_query
+
+    def test_direct_criterion_lookup_bypasses_rag(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": (
+                    "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m) "
+                    "- whats the benzene exceedance value?"
+                ),
+                "context": _benzene_hsl_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "0.5 mg/kg" in body["answer"]
+        assert body["route_used"] == "project_only"
+        assert body["grounded"] is False
+        assert body["citations"] == []
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_not_awaited()
+
+    def test_invalid_extraction_json_falls_back_to_safe_blended_route(self, client):
+        test_client, _, mock_rag, mock_openai = client
+        mock_openai.return_value = "not valid json"
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What is the TRH contamination from?",
+                "context": _trh_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["route_used"] == "blended"
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert "What is the TRH contamination from?" in rag_query
+        assert "Matched analytes: TRH C6-C10, TRH C6-C10 less BTEX, BTEX, F1" in rag_query
+
+
+class TestResponseContract:
+    def test_grounded_metadata_and_citations_returned_for_kb_route(self, client):
+        test_client, _, _, _ = client
+
+        response = test_client.post(
+            "/query",
+            json={"question": "What are the soil guidelines?"},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "kb_only"
+        assert body["grounded"] is True
+        assert body["citations"]
+        assert body["citations"][0] == {
+            "source": "NEPM_2013.pdf",
+            "title": "NEPM 2013",
+            "locator": "p. 123",
+            "snippet": (
+                "TRH C6-C10 and related hydrocarbon fractions should be assessed "
+                "against the selected land use criteria in the NEPM."
+            ),
+        }
+
+    def test_project_only_metadata_returns_empty_citations(self, client):
+        test_client, _, _, mock_openai = client
+        mock_openai.side_effect = [
+            json.dumps({"route": "project_only"}),
+            "The main exceedance is Lead in BH-01.",
+        ]
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What are the main exceedances?",
+                "context": _full_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "project_only"
+        assert body["grounded"] is False
+        assert body["citations"] == []
 
 
 class TestInvalidContext:
@@ -419,11 +803,14 @@ class TestOversizeContext:
 class TestSessionBehaviour:
     def test_session_persists_with_context(self, client):
         test_client, _, _, mock_openai = client
-        mock_openai.return_value = json.dumps({"route": "kb_only"})
+        mock_openai.side_effect = [
+            json.dumps({"route": "project_only"}),
+            "The main exceedance is Lead in BH-01.",
+        ]
 
         first = test_client.post(
             "/query",
-            json={"question": "First", "context": _full_context()},
+            json={"question": "What are the main exceedances?", "context": _full_context()},
         )
         session_id = first.json()["session_id"]
 
@@ -436,7 +823,10 @@ class TestSessionBehaviour:
 
     def test_session_reset_after_max_exchanges(self, client):
         test_client, server, _, mock_openai = client
-        mock_openai.return_value = json.dumps({"route": "kb_only"})
+        mock_openai.side_effect = [
+            json.dumps({"route": "project_only"}),
+            "The main exceedance is Lead in BH-01.",
+        ]
 
         session_id = None
         for index in range(server.MAX_EXCHANGES):
@@ -444,7 +834,8 @@ class TestSessionBehaviour:
             if session_id:
                 payload["session_id"] = session_id
             if index == 0:
-                payload["context"] = _minimal_context()
+                payload["context"] = _full_context()
+                payload["question"] = "What are the main exceedances?"
 
             response = test_client.post("/query", json=payload)
             assert response.status_code == 200
@@ -453,192 +844,57 @@ class TestSessionBehaviour:
         assert response.json()["session_reset"] is True
 
 
-class TestRoutingBehaviour:
-    def test_direct_criterion_lookup_uses_project_context_threshold(self, client):
-        test_client, _, mock_rag, mock_openai = client
-
-        response = test_client.post(
-            "/query",
-            json={
-                "question": (
-                    "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m) "
-                    "- whats the benzene exceedance value?"
-                ),
-                "context": _benzene_hsl_context(),
-            },
-        )
-
-        assert response.status_code == 200
-        answer = response.json()["answer"]
-        assert "0.5 mg/kg" in answer
-        assert "0.6 mg/kg" not in answer
-        assert "0.1 mg/kg" not in answer
-        mock_openai.assert_not_awaited()
-        mock_rag.aquery.assert_not_awaited()
-
-    def test_project_only_bypasses_rag(self, client):
-        test_client, _, mock_rag, mock_openai = client
+class TestForwardCompatibility:
+    def test_unknown_top_level_field_is_accepted(self, client):
+        test_client, _, _, mock_openai = client
         mock_openai.side_effect = [
-            json.dumps(
-                {
-                    "route": "project_only",
-                    "project": {"projectName": "Project One"},
-                    "selectedCriteria": {"applicableCriteria": "NEPM 2013 HIL-A"},
-                }
-            ),
-            "The selected criteria are NEPM 2013 HIL-A.",
+            json.dumps({"route": "project_only"}),
+            "The main exceedance is Lead in BH-01.",
+        ]
+
+        context = _minimal_context()
+        context["futureField"] = {"data": "something new"}
+        context["projectState"]["exceedances"] = [
+            {"analyte": "Lead", "sampleCode": "BH-01", "value": 720}
         ]
 
         response = test_client.post(
             "/query",
-            json={"question": "What criteria have I selected?", "context": _full_context()},
-        )
-
-        assert response.status_code == 200
-        assert response.json()["answer"] == "The selected criteria are NEPM 2013 HIL-A."
-        mock_rag.aquery.assert_not_awaited()
-        assert mock_openai.await_count == 2
-
-    def test_kb_only_uses_plain_question(self, client):
-        test_client, _, mock_rag, mock_openai = client
-        mock_openai.return_value = json.dumps({"route": "kb_only"})
-
-        response = test_client.post(
-            "/query",
-            json={
-                "question": "How did they evaluate the HIL values in the NEPM?",
-                "context": _full_context(),
-            },
-        )
-
-        assert response.status_code == 200
-        rag_query = mock_rag.aquery.await_args.args[0]
-        assert rag_query == "How did they evaluate the HIL values in the NEPM?"
-        assert '"projectState"' not in rag_query
-
-    def test_blended_query_carries_project_and_criteria_context(self, client):
-        test_client, _, mock_rag, mock_openai = client
-        mock_openai.return_value = json.dumps(
-            {
-                "route": "blended",
-                "project": {
-                    "siteName": "Ducat",
-                    "projectType": "soil",
-                    "labReportNumber": "LAB-001",
-                },
-                "selectedCriteria": {
-                    "applicableCriteria": "NEPM 2013 HIL-A",
-                    "landUse": "Residential",
-                    "state": "QLD",
-                    "criteriaNames": ["NEPM 2013 HIL-A"],
-                },
-                "criteria": {
-                    "criteriaDetails": [
-                        {
-                            "name": "NEPM 2013 HIL-A",
-                            "thresholds": [
-                                {"analyte": "Lead", "value": 300, "unit": "mg/kg"}
-                            ],
-                        }
-                    ]
-                },
-                "exceedanceSummary": {
-                    "totalExceedances": 1,
-                    "exceededCriteria": ["NEPM 2013 HIL-A"],
-                    "affectedAnalytes": ["Lead"],
-                },
-                "exceedances": [
-                    {
-                        "analyte": "Lead",
-                        "sampleCode": "BH-01",
-                        "value": 720,
-                        "unit": "mg/kg",
-                        "criterion": "NEPM 2013 HIL-A",
-                        "criterionValue": 300,
-                    }
-                ],
-                "relevantSamples": [
-                    {
-                        "sampleCode": "BH-01",
-                        "depth": "0-0.5m",
-                        "analyteValues": [
-                            {"analyte": "Lead", "value": 720, "unit": "mg/kg"}
-                        ],
-                    }
-                ],
-                "summary": "The user wants to know which applied guideline is exceeded.",
-            }
-        )
-
-        response = test_client.post(
-            "/query",
-            json={
-                "question": "Which applied guideline have I exceeded?",
-                "context": _full_context(),
-            },
-        )
-
-        assert response.status_code == 200
-        rag_query = mock_rag.aquery.await_args.args[0]
-        assert "Site: Ducat" in rag_query
-        assert "Applicable criteria: NEPM 2013 HIL-A" in rag_query
-        assert "Criterion NEPM 2013 HIL-A: Lead=300 mg/kg" in rag_query
-        assert "Lead at 720 mg/kg in BH-01" in rag_query
-
-    def test_invalid_extraction_json_falls_back_to_blended_summary(self, client):
-        test_client, _, mock_rag, mock_openai = client
-        mock_openai.return_value = "not valid json"
-
-        response = test_client.post(
-            "/query",
-            json={"question": "Which applied guideline have I exceeded?", "context": _full_context()},
-        )
-
-        assert response.status_code == 200
-        rag_query = mock_rag.aquery.await_args.args[0]
-        assert "Which applied guideline have I exceeded?" in rag_query
-        assert "not valid json" in rag_query
-
-
-class TestForwardCompatibility:
-    def test_unknown_top_level_field_is_accepted(self, client):
-        test_client, _, _, mock_openai = client
-        mock_openai.return_value = json.dumps({"route": "kb_only"})
-
-        context = _minimal_context()
-        context["futureField"] = {"data": "something new"}
-
-        response = test_client.post(
-            "/query",
-            json={"question": "Hello", "context": context},
+            json={"question": "What are the main exceedances?", "context": context},
         )
 
         assert response.status_code == 200
 
     def test_unknown_nested_field_is_accepted(self, client):
         test_client, _, _, mock_openai = client
-        mock_openai.return_value = json.dumps({"route": "kb_only"})
+        mock_openai.side_effect = [
+            json.dumps({"route": "project_only"}),
+            "The main exceedance is Lead in BH-01.",
+        ]
 
-        context = _minimal_context()
+        context = _full_context()
         context["projectState"]["project"]["newMetric"] = 42
 
         response = test_client.post(
             "/query",
-            json={"question": "Hello", "context": context},
+            json={"question": "What are the main exceedances?", "context": context},
         )
 
         assert response.status_code == 200
 
     def test_unknown_exceedance_field_is_accepted(self, client):
         test_client, _, _, mock_openai = client
-        mock_openai.return_value = json.dumps({"route": "kb_only"})
+        mock_openai.side_effect = [
+            json.dumps({"route": "project_only"}),
+            "The main exceedance is Lead in BH-01.",
+        ]
 
         context = _full_context()
         context["projectState"]["exceedances"][0]["newFlag"] = True
 
         response = test_client.post(
             "/query",
-            json={"question": "Hello", "context": context},
+            json={"question": "What are the main exceedances?", "context": context},
         )
 
         assert response.status_code == 200
@@ -736,16 +992,6 @@ class TestBuildGroundingPrompt:
         assert "## Retrieval Context" in prompt
         assert "Matched analytes: Lead" in prompt
         assert "Retrieved rows: 1" in prompt
-
-    def test_full_context_grounding(self):
-        prompt = build_grounding_prompt(WorkspaceContext(**_full_context()))
-
-        assert "## Project" in prompt
-        assert "## Selected Criteria" in prompt
-        assert "## Exceedance Summary" in prompt
-        assert "## Exceedances" in prompt
-        assert "## Project Results" in prompt
-        assert "## Retrieval Context" in prompt
 
 
 class TestContextModelValidation:
