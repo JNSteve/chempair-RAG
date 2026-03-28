@@ -7,13 +7,56 @@ the backend can route questions as project-only, KB-only, or blended.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 MAX_CONVERSATION_MESSAGES = 20
 MAX_CONTEXT_PAYLOAD_BYTES = 512 * 1024  # 512 KB
+
+PROJECT_STATE_KEYS = {
+    "project",
+    "selectedCriteria",
+    "criteriaDetails",
+    "exceedanceSummary",
+    "exceedances",
+    "projectResults",
+    "fieldSummary",
+}
+RETRIEVAL_CONTEXT_KEYS = {
+    "matchedAnalytes",
+    "matchedSampleCodes",
+    "questionTokens",
+    "retrievedRows",
+}
+PROJECT_INFO_KEYS = {
+    "projectName",
+    "projectId",
+    "siteName",
+    "address",
+    "labReportNumber",
+    "projectType",
+    "sourceFile",
+    "totalSamples",
+    "totalAnalytes",
+}
+
+
+def _to_plain_dict(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, BaseModel):
+        return value.model_dump(exclude_none=True)
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
+
+
+def _merge_if_missing(target: dict[str, Any], source: dict[str, Any]) -> dict[str, Any]:
+    for key, value in source.items():
+        target.setdefault(key, value)
+    return target
 
 
 class ProjectInfo(BaseModel):
@@ -161,6 +204,57 @@ class WorkspaceContext(BaseModel):
     conversation: Optional[List[ConversationMessage]] = Field(
         default=None, max_length=MAX_CONVERSATION_MESSAGES
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise_legacy_context(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        raw = dict(data)
+        project_state = _to_plain_dict(raw.pop("projectState", None))
+        retrieval_context = _to_plain_dict(raw.pop("retrievalContext", None))
+
+        canonical_project = _to_plain_dict(project_state.get("project"))
+        flat_project = _to_plain_dict(raw.pop("project", None))
+        if flat_project:
+            _merge_if_missing(canonical_project, flat_project)
+
+        flat_project_fields = {}
+        for key in list(raw.keys()):
+            if key in PROJECT_INFO_KEYS:
+                flat_project_fields[key] = raw.pop(key)
+        if flat_project_fields:
+            _merge_if_missing(canonical_project, flat_project_fields)
+        if canonical_project:
+            project_state["project"] = canonical_project
+
+        for key in PROJECT_STATE_KEYS - {"project"}:
+            flat_value = raw.pop(key, None)
+            if flat_value is not None and key not in project_state:
+                project_state[key] = flat_value
+
+        if "retrieval" in raw:
+            retrieval_context = _merge_if_missing(
+                retrieval_context, _to_plain_dict(raw.pop("retrieval"))
+            )
+
+        for key in RETRIEVAL_CONTEXT_KEYS:
+            flat_value = raw.pop(key, None)
+            if flat_value is not None and key not in retrieval_context:
+                retrieval_context[key] = flat_value
+
+        if "conversationHistory" in raw and "conversation" not in raw:
+            raw["conversation"] = raw.pop("conversationHistory")
+        if "messages" in raw and "conversation" not in raw:
+            raw["conversation"] = raw.pop("messages")
+
+        if project_state:
+            raw["projectState"] = project_state
+        if retrieval_context:
+            raw["retrievalContext"] = retrieval_context
+
+        return raw
 
 
 def build_grounding_prompt(ctx: WorkspaceContext) -> str:
