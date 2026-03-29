@@ -234,6 +234,40 @@ def _benzene_hsl_context() -> dict:
     }
 
 
+def _benzene_eil_context() -> dict:
+    return {
+        "schemaVersion": 3,
+        "generatedAtIso": "2026-03-27T10:00:00.000Z",
+        "projectState": {
+            "project": {
+                "projectName": "Project EIL",
+                "projectId": "project-eil",
+                "projectType": "soil",
+            },
+            "selectedCriteria": {
+                "applicableCriteria": "EIL Freshwater Investigation Level",
+                "regulations": ["NEPM 2013"],
+                "landUse": "Ecological",
+                "state": "QLD",
+                "criteriaNames": ["EIL Freshwater Investigation Level"],
+                "criteriaCount": 1,
+            },
+            "criteriaDetails": [
+                {
+                    "name": "EIL Freshwater Investigation Level",
+                    "thresholds": [
+                        {"analyte": "Benzene", "value": 0.08, "unit": "mg/L"}
+                    ],
+                }
+            ],
+        },
+        "retrievalContext": {
+            "matchedAnalytes": ["Benzene"],
+            "questionTokens": ["benzene", "eil"],
+        },
+    }
+
+
 def _trh_context() -> dict:
     return {
         "schemaVersion": 3,
@@ -400,16 +434,7 @@ class TestLegacyRequest:
 class TestContextCompatibility:
     def test_canonical_nested_context_request_works(self, client):
         test_client, _, mock_rag, mock_openai = client
-        mock_openai.side_effect = [
-            json.dumps(
-                {
-                    "route": "project_only",
-                    "project": {"projectName": "Project One"},
-                    "selectedCriteria": {"applicableCriteria": "NEPM 2013 HIL-A"},
-                }
-            ),
-            "The selected criteria are NEPM 2013 HIL-A.",
-        ]
+        mock_openai.return_value = "The selected criteria are NEPM 2013 HIL-A."
 
         response = test_client.post(
             "/query",
@@ -427,19 +452,11 @@ class TestContextCompatibility:
         assert body["citations"] == []
         assert body["answer"] == "The selected criteria are NEPM 2013 HIL-A."
         mock_rag.aquery.assert_not_awaited()
-        assert mock_openai.await_count == 2
+        assert mock_openai.await_count == 1
 
     def test_flat_schema_context_normalises_for_endpoint(self, client):
         test_client, _, mock_rag, mock_openai = client
-        mock_openai.side_effect = [
-            json.dumps(
-                {
-                    "route": "project_only",
-                    "project": {"projectName": "Project One"},
-                }
-            ),
-            "The main exceedance is Lead in BH-01.",
-        ]
+        mock_openai.return_value = "The main exceedance is Lead in BH-01."
 
         response = test_client.post(
             "/query",
@@ -456,7 +473,7 @@ class TestContextCompatibility:
         assert body["grounded"] is False
         assert body["citations"] == []
         mock_rag.aquery.assert_not_awaited()
-        assert mock_openai.await_count == 2
+        assert mock_openai.await_count == 1
 
     def test_workspace_context_model_normalises_flat_schema(self):
         context = WorkspaceContext(**_flat_context())
@@ -515,10 +532,7 @@ class TestContextCompatibility:
 class TestRoutingBehaviour:
     def test_main_exceedances_forces_project_only(self, client):
         test_client, _, mock_rag, mock_openai = client
-        mock_openai.side_effect = [
-            json.dumps({"route": "kb_only"}),
-            "The main exceedance is Lead in BH-01.",
-        ]
+        mock_openai.return_value = "The main exceedance is Lead in BH-01."
 
         response = test_client.post(
             "/query",
@@ -534,7 +548,7 @@ class TestRoutingBehaviour:
         assert body["grounded"] is False
         assert body["citations"] == []
         mock_rag.aquery.assert_not_awaited()
-        assert mock_openai.await_count == 2
+        assert mock_openai.await_count == 1
 
     def test_generic_guidance_question_routes_kb_only(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -605,7 +619,6 @@ class TestRoutingBehaviour:
 
     def test_trh_source_question_forces_blended(self, client):
         test_client, _, mock_rag, mock_openai = client
-        mock_openai.return_value = json.dumps({"route": "project_only"})
 
         response = test_client.post(
             "/query",
@@ -622,14 +635,15 @@ class TestRoutingBehaviour:
         assert body["citations"]
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert "Matched analytes: TRH C6-C10, TRH C6-C10 less BTEX, BTEX, F1" in rag_query
-        assert "Selected criteria: TRH C6-C10 less BTEX, F1" in rag_query
+        mock_openai.assert_not_awaited()
         assert "Regulations: NEPM 2013" in rag_query
         assert "Sample BH-TRH-01 (0-0.5m)" in rag_query
+        assert "TRH C6-C10 less BTEX=320 mg/kg" in rag_query
+        assert "BTEX=10 mg/kg" not in rag_query
+        assert "F1=90 mg/kg" not in rag_query
 
     def test_nepm_analyte_question_hits_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
-        mock_openai.return_value = json.dumps({"route": "kb_only"})
 
         response = test_client.post(
             "/query",
@@ -645,9 +659,12 @@ class TestRoutingBehaviour:
         assert body["grounded"] is True
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
+        mock_openai.assert_not_awaited()
         assert "What does the NEPM say about TRH C6-C10?" in rag_query
-        assert "Matched analytes: TRH C6-C10, TRH C6-C10 less BTEX, BTEX, F1" in rag_query
         assert "Criterion NEPM 2013 HSL-A: TRH C6-C10=100 mg/kg" in rag_query
+        assert "TRH C6-C10 less BTEX=90 mg/kg" not in rag_query
+        assert "BTEX=15 mg/kg" not in rag_query
+        assert "F1=75 mg/kg" not in rag_query
 
     def test_direct_criterion_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -672,6 +689,64 @@ class TestRoutingBehaviour:
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_not_awaited()
 
+    def test_eil_criterion_lookup_bypasses_rag(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What's the exceedance value for benzene in the EIL?",
+                "context": _benzene_eil_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "0.08 mg/L" in body["answer"]
+        assert body["route_used"] == "project_only"
+        assert body["grounded"] is False
+        assert body["citations"] == []
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_not_awaited()
+
+    def test_management_limit_lookup_bypasses_rag(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What's the management limit for benzene in the EIL?",
+                "context": _benzene_eil_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "0.08 mg/L" in body["answer"]
+        assert body["route_used"] == "project_only"
+        assert body["grounded"] is False
+        assert body["citations"] == []
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_not_awaited()
+
+    def test_investigation_level_lookup_bypasses_rag(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What's the investigation level for benzene in the EIL?",
+                "context": _benzene_eil_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "0.08 mg/L" in body["answer"]
+        assert body["route_used"] == "project_only"
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_not_awaited()
+
     def test_invalid_extraction_json_falls_back_to_safe_blended_route(self, client):
         test_client, _, mock_rag, mock_openai = client
         mock_openai.return_value = "not valid json"
@@ -687,8 +762,49 @@ class TestRoutingBehaviour:
         assert response.status_code == 200
         assert response.json()["route_used"] == "blended"
         rag_query = mock_rag.aquery.await_args.args[0]
+        mock_openai.assert_not_awaited()
         assert "What is the TRH contamination from?" in rag_query
-        assert "Matched analytes: TRH C6-C10, TRH C6-C10 less BTEX, BTEX, F1" in rag_query
+        assert "BTEX=10 mg/kg" not in rag_query
+        assert "F1=90 mg/kg" not in rag_query
+
+    def test_project_hsl_guidance_routes_blended_with_selected_criteria(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "Tell me about the HSL criteria for this project",
+                "context": _benzene_hsl_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "blended"
+        assert body["grounded"] is True
+        mock_openai.assert_not_awaited()
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert "Applicable criteria: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)" in rag_query
+        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
+
+    def test_waste_classification_for_project_routes_blended(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "Tell me about waste classification for this project",
+                "context": _benzene_eil_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "blended"
+        assert body["grounded"] is True
+        mock_openai.assert_not_awaited()
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert "Applicable criteria: EIL Freshwater Investigation Level" in rag_query
 
 
 class TestResponseContract:
