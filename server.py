@@ -23,6 +23,17 @@ from context_models import WorkspaceContext, MAX_CONTEXT_PAYLOAD_BYTES
 from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
+from query_grounding import (
+    build_grounded_context,
+    find_question_analyte as resolve_question_analyte,
+    merge_grounded_context,
+    resolve_grounded_question,
+)
+from query_normalization import normalise_text as normalise_query_text
+from query_routing import (
+    coerce_route as coerce_pipeline_route,
+    deterministic_route_guardrails as build_route_guardrails,
+)
 from raganything import RAGAnything, RAGAnythingConfig
 
 load_dotenv()
@@ -102,17 +113,46 @@ CRITERION_LOOKUP_TERMS = (
     "guidelines",
     "threshold",
     "screening",
+    "screening level",
+    "screening levels",
+    "investigation level",
+    "investigation levels",
+    "ecological investigation level",
+    "ecological investigation levels",
+    "action level",
+    "action levels",
     "hsl",
     "hil",
+    "esl",
+    "eil",
+    "management level",
+    "management levels",
+    "management limit",
+    "management limits",
+    "waste classification",
+    "waste class",
+    "waste category",
+    "disposal classification",
 )
 CRITERION_VALUE_TERMS = (
     "value",
     "limit",
     "exceedance",
     "screening level",
+    "investigation level",
+    "investigation levels",
     "criterion value",
     "guideline value",
     "threshold",
+    "allowable",
+    "maximum",
+    "trigger",
+    "trigger value",
+    "trigger values",
+    "management level",
+    "management levels",
+    "management limit",
+    "management limits",
 )
 INTERPRETIVE_ROUTE_PATTERNS = (
     r"\bsource\b",
@@ -339,9 +379,7 @@ def _build_context_json(ctx: WorkspaceContext) -> str:
 
 
 def _normalise_text(value: str | None) -> str:
-    if not value:
-        return ""
-    return re.sub(r"\s+", " ", value.strip().lower())
+    return normalise_query_text(value)
 
 
 def _format_scalar(value) -> str:
@@ -403,42 +441,7 @@ def _iter_thresholds(ctx: WorkspaceContext):
 
 
 def _find_question_analyte(question: str, ctx: WorkspaceContext) -> str | None:
-    candidates: list[str] = []
-    question_normalised = _normalise_text(question)
-
-    if ctx.retrievalContext and ctx.retrievalContext.matchedAnalytes:
-        candidates.extend(
-            analyte for analyte in ctx.retrievalContext.matchedAnalytes if analyte
-        )
-
-    for _, threshold in _iter_thresholds(ctx):
-        if threshold.analyte:
-            candidates.append(threshold.analyte)
-
-    project_state = ctx.projectState
-    if project_state and project_state.exceedances:
-        candidates.extend(ex.analyte for ex in project_state.exceedances if ex.analyte)
-    if project_state and project_state.projectResults:
-        for row in project_state.projectResults:
-            if not row.analyteValues:
-                continue
-            candidates.extend(
-                item.analyte for item in row.analyteValues if item.analyte
-            )
-
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for candidate in candidates:
-        key = _normalise_text(candidate)
-        if key and key not in seen:
-            seen.add(key)
-            deduped.append(candidate)
-
-    for candidate in sorted(deduped, key=len, reverse=True):
-        if _normalise_text(candidate) in question_normalised:
-            return candidate
-
-    return deduped[0] if deduped else None
+    return resolve_question_analyte(question, ctx)
 
 
 def _selected_criterion_names(ctx: WorkspaceContext) -> list[str]:
@@ -1056,11 +1059,27 @@ async def query(req: QueryRequest):
                 route_used = "project_only"
 
         if context_used and result is None:
-            guardrails = _deterministic_route_guardrails(req.question, req.context)
-            filtered = _canonical_filtered_context(req.context)
+            grounded_question = resolve_grounded_question(
+                req.question,
+                req.context,
+                ignored_tokens=GENERIC_REGULATION_TOKENS,
+            )
+            guardrails = build_route_guardrails(
+                req.question,
+                req.context,
+                grounded_question,
+            )
+            filtered = build_grounded_context(
+                req.context,
+                grounded_question,
+                include_regulatory_snapshot=bool(
+                    grounded_question.matched_criteria_names
+                    or guardrails.reason == "project_criteria_guidance"
+                ),
+            )
 
-            if guardrails.route_hint == "kb_only":
-                route_used = "kb_only"
+            if guardrails.route_hint:
+                route_used = guardrails.route_hint
             else:
                 extraction_notes = []
                 if guardrails.route_hint:
@@ -1075,7 +1094,8 @@ async def query(req: QueryRequest):
                 extraction_prompt = (
                     f"User question: {req.question}\n\n"
                     f"{' '.join(extraction_notes)}\n\n"
-                    f"Workspace context JSON:\n{_build_context_json(req.context)}"
+                    f"Grounded project context JSON:\n"
+                    f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
                 )
                 extraction_result = await openai_complete_if_cache(
                     LLM_MODEL,
@@ -1090,8 +1110,8 @@ async def query(req: QueryRequest):
                     logger.warning("context_json_parse_failed session=%s", session_id)
                     extracted = {"summary": str(extraction_result)[:1000]}
 
-                filtered = _merge_filtered_with_context(extracted, req.context)
-                route_used = _coerce_route(
+                filtered = merge_grounded_context(filtered, extracted)
+                route_used = coerce_pipeline_route(
                     extracted.get("route"),
                     guardrails,
                     context_used=True,
