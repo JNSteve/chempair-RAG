@@ -92,6 +92,24 @@ PROJECT_CRITERIA_TERMS = (
     "waste category",
     "disposal classification",
 )
+DOCUMENT_SCOPE_PATTERNS = (
+    "all soil types",
+    "all land uses",
+    "all values",
+    "for each soil type",
+    "for each land use",
+    "across the nepm",
+    "in the nepm",
+    "across nepm",
+    "compare",
+    "comparison",
+    "table",
+    "full table",
+    "all hsl",
+    "all hil",
+    "all esl",
+    "all eil",
+)
 
 
 @dataclass
@@ -142,6 +160,8 @@ def is_interpretive_question(grounded: GroundedQuestion) -> bool:
 def is_deterministic_project_fact_question(grounded: GroundedQuestion) -> bool:
     question_key = grounded.normalised_question
     if is_interpretive_question(grounded):
+        return False
+    if any(pattern in question_key for pattern in DOCUMENT_SCOPE_PATTERNS):
         return False
     if grounded.criterion_lookup:
         return True
@@ -196,6 +216,13 @@ def deterministic_route_guardrails(
             route_hint="blended",
             project_only_allowed=False,
             reason="project_regulatory_question",
+        )
+
+    if any(pattern in question_key for pattern in DOCUMENT_SCOPE_PATTERNS):
+        return RouteGuardrails(
+            route_hint="blended" if has_regulatory_context(ctx) else "kb_only",
+            project_only_allowed=False,
+            reason="document_scope_criteria_question",
         )
 
     if (

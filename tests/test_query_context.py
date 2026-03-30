@@ -689,6 +689,27 @@ class TestRoutingBehaviour:
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_not_awaited()
 
+    def test_broad_hsl_question_uses_blended_not_single_applied_value(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What are the criteria values in the HSL for benzene in the NEPM all soil types?",
+                "context": _benzene_hsl_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "blended"
+        assert body["grounded"] is True
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert "What are the criteria values in the HSL for benzene in the NEPM all soil types?" in rag_query
+        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
+
     def test_eil_criterion_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
 
@@ -805,6 +826,37 @@ class TestRoutingBehaviour:
         mock_openai.assert_not_awaited()
         rag_query = mock_rag.aquery.await_args.args[0]
         assert "Applicable criteria: EIL Freshwater Investigation Level" in rag_query
+
+    def test_scope_follow_up_keeps_previous_analyte_and_routes_blended(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        first = test_client.post(
+            "/query",
+            json={
+                "question": "What are the criteria values in the HSL for benzene?",
+                "context": _benzene_hsl_context(),
+            },
+        )
+        session_id = first.json()["session_id"]
+
+        second = test_client.post(
+            "/query",
+            json={
+                "question": "in the NEPM all soil types",
+                "session_id": session_id,
+                "context": _benzene_hsl_context(),
+            },
+        )
+
+        assert second.status_code == 200
+        body = second.json()
+        assert body["route_used"] == "blended"
+        assert body["grounded"] is True
+        mock_openai.assert_not_awaited()
+        assert mock_rag.aquery.await_count == 1
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert "What are the criteria values in the HSL for benzene? in the NEPM all soil types" in rag_query
+        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
 
 
 class TestResponseContract:
