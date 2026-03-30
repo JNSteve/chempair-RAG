@@ -708,7 +708,8 @@ class TestRoutingBehaviour:
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
         assert "What are the criteria values in the HSL for benzene in the NEPM all soil types?" in rag_query
-        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
+        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" not in rag_query
+        assert "Applicable criteria: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)" not in rag_query
 
     def test_non_selected_soil_type_does_not_collapse_to_selected_hsl(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -733,7 +734,8 @@ class TestRoutingBehaviour:
         assert "Matched project analytes: Benzene" in rag_query
         assert "Requested scope markers from the user question: clay" in rag_query
         assert "Do not answer using the selected project criterion alone as if it were the requested scope." in rag_query
-        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
+        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" not in rag_query
+        assert "Applicable criteria: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)" not in rag_query
 
     def test_eil_criterion_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -882,7 +884,7 @@ class TestRoutingBehaviour:
         assert mock_rag.aquery.await_count == 1
         rag_query = mock_rag.aquery.await_args.args[0]
         assert "What are the criteria values in the HSL for benzene? in the NEPM all soil types" in rag_query
-        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
+        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" not in rag_query
 
 
 class TestResponseContract:

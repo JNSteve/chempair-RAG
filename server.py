@@ -572,6 +572,13 @@ def _build_context_bot_handoff(
     return "\n".join(lines)
 
 
+def _should_minimise_project_criteria_context(question: str, ctx: WorkspaceContext) -> bool:
+    return _question_targets_criterion_lookup(question) and (
+        _question_requests_document_scope(question)
+        or question_requests_non_selected_scope(question, ctx)
+    )
+
+
 def _iter_thresholds(ctx: WorkspaceContext):
     project_state = ctx.projectState
     if not project_state or not project_state.criteriaDetails:
@@ -947,7 +954,12 @@ def _try_answer_direct_criterion_lookup(question: str, ctx: WorkspaceContext) ->
     return f"The applied {analyte} criterion for {criterion_name} is {criterion_value_text}."
 
 
-def _build_blended_rag_query(question: str, filtered: dict, context_handoff: str | None = None) -> str:
+def _build_blended_rag_query(
+    question: str,
+    filtered: dict,
+    context_handoff: str | None = None,
+    minimise_project_criteria_context: bool = False,
+) -> str:
     query_parts = [question]
 
     if context_handoff:
@@ -968,7 +980,7 @@ def _build_blended_rag_query(question: str, filtered: dict, context_handoff: str
             query_parts.append("; ".join(project_bits))
 
     selected_criteria = filtered.get("selectedCriteria", {})
-    if selected_criteria:
+    if selected_criteria and not minimise_project_criteria_context:
         criteria_bits = []
         if selected_criteria.get("applicableCriteria"):
             criteria_bits.append(
@@ -1004,7 +1016,7 @@ def _build_blended_rag_query(question: str, filtered: dict, context_handoff: str
             query_parts.append("; ".join(retrieval_bits))
 
     exceedance_summary = filtered.get("exceedanceSummary", {})
-    if exceedance_summary:
+    if exceedance_summary and not minimise_project_criteria_context:
         summary_bits = []
         if exceedance_summary.get("totalExceedances") is not None:
             summary_bits.append(
@@ -1021,35 +1033,36 @@ def _build_blended_rag_query(question: str, filtered: dict, context_handoff: str
         if summary_bits:
             query_parts.append("; ".join(summary_bits))
 
-    criteria = filtered.get("criteria", {})
-    for detail in criteria.get("criteriaDetails", []):
-        threshold_bits = []
-        for threshold in detail.get("thresholds", []):
-            analyte = threshold.get("analyte", "?")
-            value = threshold.get("value", "?")
-            unit = threshold.get("unit", "")
-            threshold_bits.append(f"{analyte}={value} {unit}".strip())
-        if threshold_bits:
+    if not minimise_project_criteria_context:
+        criteria = filtered.get("criteria", {})
+        for detail in criteria.get("criteriaDetails", []):
+            threshold_bits = []
+            for threshold in detail.get("thresholds", []):
+                analyte = threshold.get("analyte", "?")
+                value = threshold.get("value", "?")
+                unit = threshold.get("unit", "")
+                threshold_bits.append(f"{analyte}={value} {unit}".strip())
+            if threshold_bits:
+                query_parts.append(
+                    f"Criterion {detail.get('name', '?')}: {'; '.join(threshold_bits)}"
+                )
+
+        for exceedance in filtered.get("exceedances", []):
             query_parts.append(
-                f"Criterion {detail.get('name', '?')}: {'; '.join(threshold_bits)}"
+                f"{exceedance.get('analyte', '?')} at {exceedance.get('value', '?')} "
+                f"{exceedance.get('unit', '')} in {exceedance.get('sampleCode', '?')} "
+                f"(criterion: {exceedance.get('criterion', '?')} = {exceedance.get('criterionValue', '?')})"
             )
 
-    for exceedance in filtered.get("exceedances", []):
-        query_parts.append(
-            f"{exceedance.get('analyte', '?')} at {exceedance.get('value', '?')} "
-            f"{exceedance.get('unit', '')} in {exceedance.get('sampleCode', '?')} "
-            f"(criterion: {exceedance.get('criterion', '?')} = {exceedance.get('criterionValue', '?')})"
-        )
-
-    for row in filtered.get("relevantSamples", []):
-        values = ", ".join(
-            f"{item.get('analyte', '?')}={item.get('value', '?')} {item.get('unit', '')}".strip()
-            for item in row.get("analyteValues", [])
-        )
-        if values:
-            query_parts.append(
-                f"Sample {row.get('sampleCode', '?')} ({row.get('depth', '?')}): {values}"
+        for row in filtered.get("relevantSamples", []):
+            values = ", ".join(
+                f"{item.get('analyte', '?')}={item.get('value', '?')} {item.get('unit', '')}".strip()
+                for item in row.get("analyteValues", [])
             )
+            if values:
+                query_parts.append(
+                    f"Sample {row.get('sampleCode', '?')} ({row.get('depth', '?')}): {values}"
+                )
 
     summary = filtered.get("summary")
     if summary:
@@ -1299,10 +1312,15 @@ async def query(req: QueryRequest):
                     filtered,
                     guardrails.reason if 'guardrails' in locals() else None,
                 )
+                minimise_project_criteria_context = _should_minimise_project_criteria_context(
+                    effective_question,
+                    req.context,
+                )
                 rag_query = conversation_prefix + _build_blended_rag_query(
                     effective_question,
                     filtered,
                     context_handoff=context_handoff,
+                    minimise_project_criteria_context=minimise_project_criteria_context,
                 )
         if not context_used:
             route_used = "kb_only"
