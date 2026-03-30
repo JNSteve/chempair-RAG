@@ -31,6 +31,7 @@ from query_grounding import (
 )
 from query_normalization import normalise_text as normalise_query_text
 from query_routing import (
+    CRITERION_SCOPE_QUALIFIERS,
     coerce_route as coerce_pipeline_route,
     deterministic_route_guardrails as build_route_guardrails,
     question_requests_non_selected_scope,
@@ -478,6 +479,22 @@ def _question_requests_applied_scope(question: str) -> bool:
     return any(term in normalised for term in APPLIED_SCOPE_TERMS)
 
 
+def _extract_requested_scope_markers(question: str) -> list[str]:
+    normalised = _normalise_text(question)
+    markers: list[str] = []
+    for qualifier in CRITERION_SCOPE_QUALIFIERS:
+        if qualifier in normalised and qualifier not in markers:
+            markers.append(qualifier)
+
+    depth_markers = re.findall(r"\b\d+\s*(?:-\s*\d+)?\s*m\b|\b<\s*\d+\s*m\b", normalised)
+    for marker in depth_markers:
+        cleaned = re.sub(r"\s+", " ", marker.strip())
+        if cleaned and cleaned not in markers:
+            markers.append(cleaned)
+
+    return markers
+
+
 def _should_expand_follow_up_question(question: str, history: list[dict]) -> bool:
     if not history:
         return False
@@ -506,6 +523,53 @@ def _build_effective_question(question: str, history: list[dict]) -> str:
         return question
 
     return f"{last_user_question} {question}".strip()
+
+
+def _build_context_bot_handoff(
+    question: str,
+    ctx: WorkspaceContext,
+    filtered: dict,
+    route_reason: str | None,
+) -> str:
+    matched_analytes = filtered.get("retrievalContext", {}).get("matchedAnalytes", [])
+    selected_criteria = _selected_criterion_names(ctx)
+    requested_scope_markers = _extract_requested_scope_markers(question)
+    scope_mismatch = question_requests_non_selected_scope(question, ctx)
+
+    lines = [
+        "Context bot handoff:",
+        f"- User question: {question}",
+    ]
+
+    if matched_analytes:
+        lines.append(f"- Matched project analytes: {', '.join(matched_analytes)}")
+    if selected_criteria:
+        lines.append(f"- Selected project criteria: {', '.join(selected_criteria)}")
+    if requested_scope_markers:
+        lines.append(f"- Requested scope markers from the user question: {', '.join(requested_scope_markers)}")
+
+    if route_reason:
+        lines.append(f"- Routing reason: {route_reason}")
+
+    if scope_mismatch:
+        lines.append(
+            "- The user is asking for a criterion scope that is not the same as the currently selected project criterion."
+        )
+        lines.append(
+            "- Do not answer using the selected project criterion alone as if it were the requested scope."
+        )
+        lines.append(
+            "- Use the project context as factual anchor points, then use the knowledge base to add broader applicable information for the requested scope."
+        )
+    else:
+        lines.append(
+            "- Treat the supplied project context as authoritative where it directly matches the user's question."
+        )
+
+    lines.append(
+        "- Do not invent criteria, values, soil types, land uses, or depth bands that are not supported by the project context or retrieved knowledge-base evidence."
+    )
+    return "\n".join(lines)
 
 
 def _iter_thresholds(ctx: WorkspaceContext):
@@ -883,8 +947,11 @@ def _try_answer_direct_criterion_lookup(question: str, ctx: WorkspaceContext) ->
     return f"The applied {analyte} criterion for {criterion_name} is {criterion_value_text}."
 
 
-def _build_blended_rag_query(question: str, filtered: dict) -> str:
+def _build_blended_rag_query(question: str, filtered: dict, context_handoff: str | None = None) -> str:
     query_parts = [question]
+
+    if context_handoff:
+        query_parts.append(context_handoff)
 
     project = filtered.get("project", {})
     if project:
@@ -1226,8 +1293,16 @@ async def query(req: QueryRequest):
             elif route_used == "kb_only":
                 rag_query = conversation_prefix + effective_question
             else:
+                context_handoff = _build_context_bot_handoff(
+                    effective_question,
+                    req.context,
+                    filtered,
+                    guardrails.reason if 'guardrails' in locals() else None,
+                )
                 rag_query = conversation_prefix + _build_blended_rag_query(
-                    effective_question, filtered
+                    effective_question,
+                    filtered,
+                    context_handoff=context_handoff,
                 )
         if not context_used:
             route_used = "kb_only"
