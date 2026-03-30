@@ -33,6 +33,7 @@ from query_normalization import normalise_text as normalise_query_text
 from query_routing import (
     coerce_route as coerce_pipeline_route,
     deterministic_route_guardrails as build_route_guardrails,
+    question_requests_non_selected_scope,
 )
 from raganything import RAGAnything, RAGAnythingConfig
 
@@ -858,6 +859,8 @@ def _try_answer_direct_criterion_lookup(question: str, ctx: WorkspaceContext) ->
     if not _question_targets_criterion_lookup(question):
         return None
     if _question_requests_document_scope(question) and not _question_requests_applied_scope(question):
+        return None
+    if question_requests_non_selected_scope(question, ctx):
         return None
 
     project_state = ctx.projectState

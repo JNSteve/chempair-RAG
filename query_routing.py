@@ -92,6 +92,23 @@ PROJECT_CRITERIA_TERMS = (
     "waste category",
     "disposal classification",
 )
+CRITERION_SCOPE_QUALIFIERS = (
+    "clay",
+    "sand",
+    "silt",
+    "fine soil",
+    "coarse soil",
+    "residential",
+    "commercial",
+    "industrial",
+    "public open space",
+    "parkland",
+    "low density",
+    "high density",
+    "ecological",
+    "freshwater",
+    "marine",
+)
 DOCUMENT_SCOPE_PATTERNS = (
     "all soil types",
     "all land uses",
@@ -132,6 +149,36 @@ def has_regulatory_context(ctx: WorkspaceContext) -> bool:
             or selected.landUse
         )
     )
+
+
+def question_requests_non_selected_scope(question: str, ctx: WorkspaceContext) -> bool:
+    question_key = normalise_text(question)
+    selected_names: list[str] = []
+
+    project_state = ctx.projectState
+    selected = project_state.selectedCriteria if project_state else None
+    if selected:
+        if selected.criteriaNames:
+            selected_names.extend(name for name in selected.criteriaNames if name)
+        if selected.applicableCriteria:
+            selected_names.append(selected.applicableCriteria)
+
+    selected_key = " ".join(normalise_text(name) for name in selected_names if name)
+    if not selected_key:
+        return False
+
+    qualifier_mismatch = any(
+        qualifier in question_key and qualifier not in selected_key
+        for qualifier in CRITERION_SCOPE_QUALIFIERS
+    )
+    if qualifier_mismatch:
+        return True
+
+    depth_mentions = re.findall(r"\b\d+\s*(?:-\s*\d+)?\s*m\b|\b<\s*\d+\s*m\b", question_key)
+    if depth_mentions and not any(depth in selected_key for depth in depth_mentions):
+        return True
+
+    return False
 
 
 def question_needs_project_grounding(grounded: GroundedQuestion) -> bool:
@@ -192,6 +239,13 @@ def deterministic_route_guardrails(
 ) -> RouteGuardrails:
     question_key = normalise_text(question)
     needs_project_grounding = question_needs_project_grounding(grounded)
+
+    if question_requests_non_selected_scope(question, ctx):
+        return RouteGuardrails(
+            route_hint="blended" if has_regulatory_context(ctx) else "kb_only",
+            project_only_allowed=False,
+            reason="non_selected_criteria_scope",
+        )
 
     if is_deterministic_project_fact_question(grounded):
         return RouteGuardrails(
