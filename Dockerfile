@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py .
 COPY context_models.py .
+COPY context-bot-spec.md .
 COPY query_normalization.py .
 COPY query_grounding.py .
 COPY query_routing.py .
