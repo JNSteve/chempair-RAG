@@ -118,6 +118,8 @@ CONTEXT_EXTRACTION_SYSTEM = (
     "- criteria: {criteriaDetails: [{name, thresholds}]}\n"
     "- exceedanceSummary: {totalExceedances, affectedSamples, affectedAnalytes, exceededCriteria, hotspotCount}\n"
     "- exceedances: [{analyte, sampleCode, value, unit, criterion, criterionValue}]\n"
+    "- allTestedAnalytes: [analyte names tested anywhere in the project]\n"
+    "- projectResults: [{sampleCode, depth, analyteValues: [{analyte, value, unit}]}]\n"
     "- relevantSamples: [{sampleCode, depth, analyteValues: [{analyte, value, unit}]}]\n"
     "- summary: one sentence stating what the user wants to know about this data"
 )
@@ -658,6 +660,8 @@ def _run_context_bot(
             or guardrails.reason == "project_criteria_guidance"
         ),
     )
+    if route == "project_only":
+        filtered = _full_project_only_context(ctx)
     handoff = _build_context_bot_handoff(
         question,
         ctx,
@@ -779,6 +783,26 @@ def _collect_sample_codes(ctx: WorkspaceContext) -> list[str]:
         if key and key not in seen:
             seen.add(key)
             deduped.append(code)
+    return deduped
+
+
+def _collect_project_result_analytes(ctx: WorkspaceContext) -> list[str]:
+    project_state = ctx.projectState
+    if not project_state or not project_state.projectResults:
+        return []
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for row in project_state.projectResults:
+        if not row.analyteValues:
+            continue
+        for item in row.analyteValues:
+            if not item.analyte:
+                continue
+            key = _normalise_text(item.analyte)
+            if key and key not in seen:
+                seen.add(key)
+                deduped.append(item.analyte)
     return deduped
 
 
@@ -982,6 +1006,27 @@ def _canonical_filtered_context(ctx: WorkspaceContext) -> dict:
         ]
     if relevant_rows:
         snapshot["relevantSamples"] = relevant_rows
+
+    return snapshot
+
+
+def _full_project_only_context(ctx: WorkspaceContext) -> dict:
+    snapshot = _canonical_filtered_context(ctx)
+    project_state = ctx.projectState
+
+    if project_state and project_state.projectResults:
+        all_rows = [
+            row.model_dump(exclude_none=True) for row in project_state.projectResults
+        ]
+        snapshot["projectResults"] = all_rows
+        snapshot["relevantSamples"] = all_rows
+
+        all_tested_analytes = _collect_project_result_analytes(ctx)
+        if all_tested_analytes:
+            snapshot["allTestedAnalytes"] = all_tested_analytes
+
+    if project_state and project_state.fieldSummary:
+        snapshot["fieldSummary"] = project_state.fieldSummary.model_dump(exclude_none=True)
 
     return snapshot
 
