@@ -710,6 +710,31 @@ class TestRoutingBehaviour:
         assert "What are the criteria values in the HSL for benzene in the NEPM all soil types?" in rag_query
         assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
 
+    def test_non_selected_soil_type_does_not_collapse_to_selected_hsl(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What is the exceedance threshold for benzene in clay as per the HSL?",
+                "context": _benzene_hsl_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "blended"
+        assert body["grounded"] is True
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert "What is the exceedance threshold for benzene in clay as per the HSL?" in rag_query
+        assert "Context bot handoff:" in rag_query
+        assert "Matched project analytes: Benzene" in rag_query
+        assert "Requested scope markers from the user question: clay" in rag_query
+        assert "Do not answer using the selected project criterion alone as if it were the requested scope." in rag_query
+        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
+
     def test_eil_criterion_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
 
@@ -805,6 +830,7 @@ class TestRoutingBehaviour:
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         rag_query = mock_rag.aquery.await_args.args[0]
+        assert "Context bot handoff:" in rag_query
         assert "Applicable criteria: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)" in rag_query
         assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
 
