@@ -40,8 +40,8 @@ def _sample_grounding_payload() -> dict:
                     "file_path": "/kb/NEPM_2013.pdf",
                     "chunk_id": "page_123_chunk_1",
                     "content": (
-                        "TRH C6-C10 and related hydrocarbon fractions should be assessed "
-                        "against the selected land use criteria in the NEPM."
+                        "Table 1B(7) shows TRH C6-C10 and related hydrocarbon fractions "
+                        "should be assessed against the selected land use criteria in the NEPM."
                     ),
                 }
             ],
@@ -406,11 +406,12 @@ class TestLegacyRequest:
         assert body["grounded"] is True
         assert body["citations"]
         assert body["citations"][0]["source"] == "NEPM_2013.pdf"
-        assert body["citations"][0]["locator"] == "p. 123"
+        assert body["citations"][0]["locator"] == "Table 1B(7), p. 123"
         assert "session_id" in body
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
         assert mock_rag.aquery.await_args.args[0] == "What are the soil guidelines?"
+        assert "name the supporting table inline" in mock_rag.aquery.await_args.kwargs["user_prompt"]
 
     def test_legacy_with_session(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -904,10 +905,10 @@ class TestResponseContract:
         assert body["citations"][0] == {
             "source": "NEPM_2013.pdf",
             "title": "NEPM 2013",
-            "locator": "p. 123",
+            "locator": "Table 1B(7), p. 123",
             "snippet": (
-                "TRH C6-C10 and related hydrocarbon fractions should be assessed "
-                "against the selected land use criteria in the NEPM."
+                "Table 1B(7) shows TRH C6-C10 and related hydrocarbon fractions "
+                "should be assessed against the selected land use criteria in the NEPM."
             ),
         }
 

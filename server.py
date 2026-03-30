@@ -58,6 +58,8 @@ ALFIE_USER_PROMPT = (
     "Do not invent values, criteria, or sample codes. "
     "When project-applied criteria are supplied, treat them as authoritative over any general reference values. "
     "Keep soil criteria distinct from vapour criteria and other media or pathways. "
+    "When stating a regulatory numeric value from retrieved material, name the supporting table inline if the table is visible in the evidence. "
+    "If the retrieved evidence does not show the table label, say that the exact table label is not visible rather than guessing. "
     "If notable analyte or sample issues exist, keep each issue to one sentence where practical. "
     "Keep responses to short structured prose."
 )
@@ -1086,9 +1088,31 @@ def _citation_title(source: str) -> str:
     return stem or source
 
 
-def _citation_locator(reference_id: str | None, file_path: str | None, chunk_id: str | None) -> str:
-    combined = " ".join(part for part in (file_path, chunk_id, reference_id) if part)
+def _extract_table_locator(text: str | None, chunk_id: str | None = None) -> str | None:
+    combined = " ".join(part for part in (text, chunk_id) if part)
+    table_match = re.search(
+        r"\bTable\s+([A-Za-z]?\d+[A-Za-z]?(?:\([^)]+\))*)",
+        combined,
+        re.IGNORECASE,
+    )
+    if not table_match:
+        return None
+    return f"Table {table_match.group(1)}"
+
+
+def _citation_locator(
+    reference_id: str | None,
+    file_path: str | None,
+    chunk_id: str | None,
+    content: str | None = None,
+) -> str:
+    combined = " ".join(part for part in (file_path, chunk_id, reference_id, content) if part)
+    table_locator = _extract_table_locator(content, chunk_id)
     page_match = re.search(r"(?:page|p)[\s._-]?(\d{1,4})", combined, re.IGNORECASE)
+    if table_locator and page_match:
+        return f"{table_locator}, p. {page_match.group(1)}"
+    if table_locator:
+        return table_locator
     if page_match:
         return f"p. {page_match.group(1)}"
     if chunk_id:
@@ -1138,6 +1162,7 @@ def _extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
                     reference_id,
                     file_path,
                     primary_chunk.get("chunk_id"),
+                    primary_chunk.get("content"),
                 ),
                 "snippet": snippet,
             }
