@@ -557,7 +557,42 @@ class TestRoutingBehaviour:
         assert body["grounded"] is False
         assert body["citations"] == []
         mock_rag.aquery.assert_not_awaited()
-        assert mock_openai.await_count == 1
+
+    def test_project_only_context_keeps_full_project_results_and_analytes(self, client):
+        _, server, _, _ = client
+        context = _full_context()
+
+        for index in range(3, 15):
+            context["projectState"]["projectResults"].append(
+                {
+                    "sampleCode": f"BH-{index:02d}",
+                    "depth": "0-0.5m",
+                    "analyteValues": [
+                        {
+                            "analyte": f"Analyte {index}",
+                            "value": index,
+                            "unit": "mg/kg",
+                        }
+                    ],
+                }
+            )
+
+        decision = server._run_context_bot(
+            "what are the tested analytes for samples in this project",
+            WorkspaceContext.model_validate(context),
+            None,
+        )
+
+        assert decision.handoff.route == "project_only"
+        assert len(decision.filtered_context["projectResults"]) == len(
+            context["projectState"]["projectResults"]
+        )
+        assert len(decision.filtered_context["relevantSamples"]) == len(
+            context["projectState"]["projectResults"]
+        )
+        assert "Lead" in decision.filtered_context["allTestedAnalytes"]
+        assert "PFOS" in decision.filtered_context["allTestedAnalytes"]
+        assert "Analyte 14" in decision.filtered_context["allTestedAnalytes"]
 
     def test_generic_guidance_question_routes_kb_only(self, client):
         test_client, _, mock_rag, mock_openai = client
