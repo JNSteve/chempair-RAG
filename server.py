@@ -11,6 +11,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from dotenv import load_dotenv
@@ -24,15 +25,14 @@ from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
 from query_grounding import (
+    GroundedQuestion,
     build_grounded_context,
     find_question_analyte as resolve_question_analyte,
-    merge_grounded_context,
     resolve_grounded_question,
 )
 from query_normalization import normalise_text as normalise_query_text
 from query_routing import (
     CRITERION_SCOPE_QUALIFIERS,
-    coerce_route as coerce_pipeline_route,
     deterministic_route_guardrails as build_route_guardrails,
     question_requests_non_selected_scope,
 )
@@ -49,6 +49,17 @@ SESSION_TTL = 3600
 MAX_EXCHANGES = 3
 
 logger = logging.getLogger("chempair.query")
+CONTEXT_BOT_SPEC_PATH = Path(__file__).with_name("context-bot-spec.md")
+
+
+def _load_context_bot_spec() -> str:
+    spec = CONTEXT_BOT_SPEC_PATH.read_text(encoding="utf-8").strip()
+    if "# Context Bot" not in spec:
+        raise RuntimeError(f"Invalid Context Bot spec at {CONTEXT_BOT_SPEC_PATH}")
+    return spec
+
+
+CONTEXT_BOT_SPEC = _load_context_bot_spec()
 
 ALFIE_USER_PROMPT = (
     "You are Alfie, a senior Australian environmental scientist. "
@@ -56,7 +67,9 @@ ALFIE_USER_PROMPT = (
     "Give a direct answer first. Write like a concise consultant email. "
     "Do not use decorative markdown, bold text, or long bullet lists. "
     "Do not invent values, criteria, or sample codes. "
-    "When project-applied criteria are supplied, treat them as authoritative over any general reference values. "
+    "Answer from the retrieved knowledge-base evidence that matches the user's question. "
+    "Do not treat project criteria or site context as authoritative unless the user explicitly asks for project-applied values. "
+    "Prioritise numeric values from tables and exceedance criteria where relevant. "
     "Keep soil criteria distinct from vapour criteria and other media or pathways. "
     "When stating a regulatory numeric value from retrieved material, name the supporting table inline if the table is visible in the evidence. "
     "If the retrieved evidence does not show the table label, say that the exact table label is not visible rather than guessing. "
@@ -303,6 +316,22 @@ class RouteGuardrails:
     reason: str | None = None
 
 
+@dataclass
+class ContextBotHandoff:
+    route: str
+    relay_block: str
+    kb_query: str
+    reason: str
+    used_project_fields: list[str]
+
+
+@dataclass
+class ContextBotDecision:
+    grounded_question: GroundedQuestion
+    filtered_context: dict
+    handoff: ContextBotHandoff
+
+
 def get_or_create_session(session_id: str | None) -> tuple[str, list[dict]]:
     if session_id and session_id in sessions:
         sessions[session_id]["last_used"] = time.time()
@@ -527,58 +556,133 @@ def _build_effective_question(question: str, history: list[dict]) -> str:
     return f"{last_user_question} {question}".strip()
 
 
+def _first_matching_selected_threshold(
+    filtered: dict,
+    ctx: WorkspaceContext,
+    question: str,
+) -> tuple[str | None, str | None]:
+    analyte = _find_question_analyte(question, ctx)
+    if not analyte or _normalise_text(analyte) not in _normalise_text(question):
+        return analyte, None
+    criteria = filtered.get("criteria", {})
+    selected_names = {_normalise_text(name) for name in _selected_criterion_names(ctx)}
+
+    for detail in criteria.get("criteriaDetails", []):
+        detail_name = detail.get("name")
+        if detail_name and _normalise_text(detail_name) not in selected_names:
+            continue
+        for threshold in detail.get("thresholds", []):
+            if analyte and _normalise_text(threshold.get("analyte")) != _normalise_text(analyte):
+                continue
+            return analyte, _format_value(threshold.get("value"), threshold.get("unit"))
+    return analyte, None
+
+
+def _build_relay_block(
+    question: str,
+    ctx: WorkspaceContext,
+    filtered: dict,
+    route: str,
+) -> tuple[str, list[str]]:
+    if route != "hybrid":
+        return "", []
+
+    used_project_fields: list[str] = []
+    selected = filtered.get("selectedCriteria", {})
+    applicable_criterion = selected.get("applicableCriteria")
+    if applicable_criterion:
+        used_project_fields.append("selectedCriteria.applicableCriteria")
+
+    analyte, criterion_value = _first_matching_selected_threshold(filtered, ctx, question)
+    if criterion_value:
+        used_project_fields.append("criteria.criteriaDetails.thresholds")
+
+    if applicable_criterion and analyte and criterion_value:
+        return (
+            f"For this site, the selected criterion is {applicable_criterion}, with {analyte} at {criterion_value}.",
+            used_project_fields,
+        )
+    if applicable_criterion:
+        return (
+            f"For this site, the selected criterion is {applicable_criterion}.",
+            used_project_fields,
+        )
+    return "", []
+
+
 def _build_context_bot_handoff(
     question: str,
     ctx: WorkspaceContext,
     filtered: dict,
+    route: str,
     route_reason: str | None,
-) -> str:
-    matched_analytes = filtered.get("retrievalContext", {}).get("matchedAnalytes", [])
-    selected_criteria = _selected_criterion_names(ctx)
-    requested_scope_markers = _extract_requested_scope_markers(question)
-    scope_mismatch = question_requests_non_selected_scope(question, ctx)
-
-    lines = [
-        "Context bot handoff:",
-        f"- User question: {question}",
-    ]
-
-    if matched_analytes:
-        lines.append(f"- Matched project analytes: {', '.join(matched_analytes)}")
-    if selected_criteria:
-        lines.append(f"- Selected project criteria: {', '.join(selected_criteria)}")
-    if requested_scope_markers:
-        lines.append(f"- Requested scope markers from the user question: {', '.join(requested_scope_markers)}")
-
-    if route_reason:
-        lines.append(f"- Routing reason: {route_reason}")
-
-    if scope_mismatch:
-        lines.append(
-            "- The user is asking for a criterion scope that is not the same as the currently selected project criterion."
-        )
-        lines.append(
-            "- Do not answer using the selected project criterion alone as if it were the requested scope."
-        )
-        lines.append(
-            "- Use the project context as factual anchor points, then use the knowledge base to add broader applicable information for the requested scope."
-        )
-    else:
-        lines.append(
-            "- Treat the supplied project context as authoritative where it directly matches the user's question."
-        )
-
-    lines.append(
-        "- Do not invent criteria, values, soil types, land uses, or depth bands that are not supported by the project context or retrieved knowledge-base evidence."
+) -> ContextBotHandoff:
+    relay_block, used_project_fields = _build_relay_block(question, ctx, filtered, route)
+    return ContextBotHandoff(
+        route=route,
+        relay_block=relay_block,
+        kb_query=question,
+        reason=route_reason or "unspecified",
+        used_project_fields=used_project_fields,
     )
-    return "\n".join(lines)
 
 
-def _should_minimise_project_criteria_context(question: str, ctx: WorkspaceContext) -> bool:
-    return _question_targets_criterion_lookup(question) and (
-        _question_requests_document_scope(question)
-        or question_requests_non_selected_scope(question, ctx)
+def _run_context_bot(
+    question: str,
+    ctx: WorkspaceContext,
+    previous_route: str | None,
+) -> ContextBotDecision:
+    """
+    Context Bot runtime entrypoint.
+
+    Source of truth: context-bot-spec.md in the repo root. Any change to
+    classification, handoff, or isolation rules must be reflected there first.
+    """
+    grounded_question = resolve_grounded_question(
+        question,
+        ctx,
+        ignored_tokens=GENERIC_REGULATION_TOKENS,
     )
+    guardrails = build_route_guardrails(
+        question,
+        ctx,
+        grounded_question,
+        previous_route=previous_route,
+    )
+    route = guardrails.route_hint or "regulatory_only"
+    filtered = build_grounded_context(
+        ctx,
+        grounded_question,
+        include_regulatory_snapshot=bool(
+            grounded_question.matched_criteria_names
+            or guardrails.reason == "project_criteria_guidance"
+        ),
+    )
+    handoff = _build_context_bot_handoff(
+        question,
+        ctx,
+        filtered,
+        route,
+        guardrails.reason,
+    )
+    logger.info(
+        "context_bot route=%s reason=%s used_project_fields=%s spec=%s",
+        handoff.route,
+        handoff.reason,
+        ",".join(handoff.used_project_fields),
+        CONTEXT_BOT_SPEC_PATH.name,
+    )
+    return ContextBotDecision(
+        grounded_question=grounded_question,
+        filtered_context=filtered,
+        handoff=handoff,
+    )
+
+
+def _assemble_isolated_answer(route: str, relay_block: str, kb_answer: str) -> str:
+    if route != "hybrid" or not relay_block.strip():
+        return kb_answer
+    return f"{relay_block.strip()}\n\n{kb_answer.strip()}"
 
 
 def _iter_thresholds(ctx: WorkspaceContext):
@@ -956,123 +1060,6 @@ def _try_answer_direct_criterion_lookup(question: str, ctx: WorkspaceContext) ->
     return f"The applied {analyte} criterion for {criterion_name} is {criterion_value_text}."
 
 
-def _build_blended_rag_query(
-    question: str,
-    filtered: dict,
-    context_handoff: str | None = None,
-    minimise_project_criteria_context: bool = False,
-) -> str:
-    query_parts = [question]
-
-    if context_handoff:
-        query_parts.append(context_handoff)
-
-    project = filtered.get("project", {})
-    if project:
-        project_bits = []
-        if project.get("siteName"):
-            project_bits.append(f"Site: {project['siteName']}")
-        if project.get("address"):
-            project_bits.append(f"Address: {project['address']}")
-        if project.get("projectType"):
-            project_bits.append(f"Project type: {project['projectType']}")
-        if project.get("labReportNumber"):
-            project_bits.append(f"Lab report: {project['labReportNumber']}")
-        if project_bits:
-            query_parts.append("; ".join(project_bits))
-
-    selected_criteria = filtered.get("selectedCriteria", {})
-    if selected_criteria and not minimise_project_criteria_context:
-        criteria_bits = []
-        if selected_criteria.get("applicableCriteria"):
-            criteria_bits.append(
-                f"Applicable criteria: {selected_criteria['applicableCriteria']}"
-            )
-        if selected_criteria.get("regulations"):
-            criteria_bits.append(
-                f"Regulations: {', '.join(selected_criteria['regulations'])}"
-            )
-        if selected_criteria.get("landUse"):
-            criteria_bits.append(f"Land use: {selected_criteria['landUse']}")
-        if selected_criteria.get("state"):
-            criteria_bits.append(f"State: {selected_criteria['state']}")
-        if selected_criteria.get("criteriaNames"):
-            criteria_bits.append(
-                f"Selected criteria: {', '.join(selected_criteria['criteriaNames'])}"
-            )
-        if criteria_bits:
-            query_parts.append("; ".join(criteria_bits))
-
-    retrieval_context = filtered.get("retrievalContext", {})
-    if retrieval_context:
-        retrieval_bits = []
-        if retrieval_context.get("matchedAnalytes"):
-            retrieval_bits.append(
-                f"Matched analytes: {', '.join(retrieval_context['matchedAnalytes'])}"
-            )
-        if retrieval_context.get("matchedSampleCodes"):
-            retrieval_bits.append(
-                f"Matched samples: {', '.join(retrieval_context['matchedSampleCodes'])}"
-            )
-        if retrieval_bits:
-            query_parts.append("; ".join(retrieval_bits))
-
-    exceedance_summary = filtered.get("exceedanceSummary", {})
-    if exceedance_summary and not minimise_project_criteria_context:
-        summary_bits = []
-        if exceedance_summary.get("totalExceedances") is not None:
-            summary_bits.append(
-                f"Total exceedances: {exceedance_summary['totalExceedances']}"
-            )
-        if exceedance_summary.get("exceededCriteria"):
-            summary_bits.append(
-                f"Exceeded criteria: {', '.join(exceedance_summary['exceededCriteria'])}"
-            )
-        if exceedance_summary.get("affectedAnalytes"):
-            summary_bits.append(
-                f"Affected analytes: {', '.join(exceedance_summary['affectedAnalytes'])}"
-            )
-        if summary_bits:
-            query_parts.append("; ".join(summary_bits))
-
-    if not minimise_project_criteria_context:
-        criteria = filtered.get("criteria", {})
-        for detail in criteria.get("criteriaDetails", []):
-            threshold_bits = []
-            for threshold in detail.get("thresholds", []):
-                analyte = threshold.get("analyte", "?")
-                value = threshold.get("value", "?")
-                unit = threshold.get("unit", "")
-                threshold_bits.append(f"{analyte}={value} {unit}".strip())
-            if threshold_bits:
-                query_parts.append(
-                    f"Criterion {detail.get('name', '?')}: {'; '.join(threshold_bits)}"
-                )
-
-        for exceedance in filtered.get("exceedances", []):
-            query_parts.append(
-                f"{exceedance.get('analyte', '?')} at {exceedance.get('value', '?')} "
-                f"{exceedance.get('unit', '')} in {exceedance.get('sampleCode', '?')} "
-                f"(criterion: {exceedance.get('criterion', '?')} = {exceedance.get('criterionValue', '?')})"
-            )
-
-        for row in filtered.get("relevantSamples", []):
-            values = ", ".join(
-                f"{item.get('analyte', '?')}={item.get('value', '?')} {item.get('unit', '')}".strip()
-                for item in row.get("analyteValues", [])
-            )
-            if values:
-                query_parts.append(
-                    f"Sample {row.get('sampleCode', '?')} ({row.get('depth', '?')}): {values}"
-                )
-
-    summary = filtered.get("summary")
-    if summary:
-        query_parts.append(summary)
-
-    return "\n".join(query_parts)
-
-
 def _file_source_name(file_path: str | None, reference_id: str | None) -> str:
     if file_path:
         cleaned = str(file_path).replace("\\", "/").rstrip("/")
@@ -1231,131 +1218,54 @@ async def query(req: QueryRequest):
         logger.info("context_absent session=%s", session_id)
 
     try:
-        conversation_prefix = ""
-        if history:
-            context_parts = []
-            for message in history[-6:]:
-                context_parts.append(f"{message['role'].upper()}: {message['content'][:300]}")
-            conversation_prefix = "Previous conversation:\n" + "\n".join(context_parts) + "\n\n"
-
         result = None
         effective_question = _build_effective_question(req.question, history)
-        rag_query = conversation_prefix + effective_question if conversation_prefix else effective_question
+        rag_query = effective_question
 
         if context_used:
-            direct_context_answer = _try_answer_direct_criterion_lookup(
-                effective_question, req.context
-            )
-            if direct_context_answer:
-                result = direct_context_answer
-                route_used = "project_only"
-
-        if context_used and result is None:
-            grounded_question = resolve_grounded_question(
+            previous_route = sessions.get(session_id, {}).get("last_route")
+            context_bot = _run_context_bot(
                 effective_question,
                 req.context,
-                ignored_tokens=GENERIC_REGULATION_TOKENS,
+                previous_route,
             )
-            guardrails = build_route_guardrails(
-                effective_question,
-                req.context,
-                grounded_question,
-            )
-            filtered = build_grounded_context(
-                req.context,
-                grounded_question,
-                include_regulatory_snapshot=bool(
-                    grounded_question.matched_criteria_names
-                    or guardrails.reason == "project_criteria_guidance"
-                ),
-            )
+            route_used = context_bot.handoff.route
+            filtered = context_bot.filtered_context
+            handoff = context_bot.handoff
 
-            if guardrails.route_hint:
-                route_used = guardrails.route_hint
-            else:
-                extraction_notes = []
-                if guardrails.route_hint:
-                    extraction_notes.append(
-                        f"Deterministic route guardrail: prefer {guardrails.route_hint}."
+            if route_used == "project_only" and result is None:
+                direct_context_answer = _try_answer_direct_criterion_lookup(
+                    effective_question, req.context
+                )
+                if direct_context_answer:
+                    result = direct_context_answer
+                else:
+                    answer_prompt = (
+                        f"User question: {effective_question}\n\n"
+                        f"Relevant project context JSON:\n"
+                        f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
                     )
-                if not guardrails.project_only_allowed:
-                    extraction_notes.append(
-                        "Deterministic route guardrail: project_only is not allowed."
+                    result = await openai_complete_if_cache(
+                        LLM_MODEL,
+                        answer_prompt,
+                        system_prompt=PROJECT_ONLY_ANSWER_SYSTEM,
+                        api_key=os.getenv("OPENAI_API_KEY"),
                     )
-
-                extraction_prompt = (
-                    f"User question: {effective_question}\n\n"
-                    f"{' '.join(extraction_notes)}\n\n"
-                    f"Grounded project context JSON:\n"
-                    f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
-                )
-                extraction_result = await openai_complete_if_cache(
-                    LLM_MODEL,
-                    extraction_prompt,
-                    system_prompt=CONTEXT_EXTRACTION_SYSTEM,
-                    api_key=os.getenv("OPENAI_API_KEY"),
-                )
-
-                try:
-                    extracted = json.loads(extraction_result)
-                except (json.JSONDecodeError, TypeError):
-                    logger.warning("context_json_parse_failed session=%s", session_id)
-                    extracted = {"summary": str(extraction_result)[:1000]}
-
-                filtered = merge_grounded_context(filtered, extracted)
-                route_used = coerce_pipeline_route(
-                    extracted.get("route"),
-                    guardrails,
-                    context_used=True,
-                )
-
-            logger.info(
-                "context_route=%s reason=%s session=%s",
-                route_used,
-                guardrails.reason if 'guardrails' in locals() else None,
-                session_id,
-            )
-
-            if route_used == "project_only":
-                answer_prompt = (
-                    f"User question: {effective_question}\n\n"
-                    f"Relevant project context JSON:\n"
-                    f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
-                )
-                result = await openai_complete_if_cache(
-                    LLM_MODEL,
-                    answer_prompt,
-                    system_prompt=PROJECT_ONLY_ANSWER_SYSTEM,
-                    api_key=os.getenv("OPENAI_API_KEY"),
-                )
-            elif route_used == "kb_only":
-                rag_query = conversation_prefix + effective_question
             else:
-                context_handoff = _build_context_bot_handoff(
-                    effective_question,
-                    req.context,
-                    filtered,
-                    guardrails.reason if 'guardrails' in locals() else None,
-                )
-                minimise_project_criteria_context = _should_minimise_project_criteria_context(
-                    effective_question,
-                    req.context,
-                )
-                rag_query = conversation_prefix + _build_blended_rag_query(
-                    effective_question,
-                    filtered,
-                    context_handoff=context_handoff,
-                    minimise_project_criteria_context=minimise_project_criteria_context,
-                )
-        if not context_used:
-            route_used = "kb_only"
+                rag_query = handoff.kb_query
+        else:
+            route_used = "regulatory_only"
 
         if result is None:
-            result = await rag.aquery(
+            kb_answer = await rag.aquery(
                 rag_query,
                 mode=req.mode,
                 user_prompt=ALFIE_USER_PROMPT,
             )
+            if context_used and route_used == "hybrid":
+                result = _assemble_isolated_answer(route_used, handoff.relay_block, kb_answer)
+            else:
+                result = kb_answer
             try:
                 citations = await _fetch_rag_citations(rag_query, req.mode)
             except Exception as citation_error:
@@ -1369,6 +1279,7 @@ async def query(req: QueryRequest):
 
         history.append({"role": "user", "content": req.question})
         history.append({"role": "assistant", "content": result})
+        sessions[session_id]["last_route"] = route_used
 
         session_reset = False
         if len(history) >= MAX_EXCHANGES * 2:

@@ -390,6 +390,13 @@ def client():
 
 
 class TestLegacyRequest:
+    def test_context_bot_spec_is_loaded_from_repo_file(self, client):
+        _, server, _, _ = client
+
+        assert server.CONTEXT_BOT_SPEC_PATH.name == "context-bot-spec.md"
+        assert server.CONTEXT_BOT_SPEC_PATH.exists()
+        assert "# Context Bot" in server.CONTEXT_BOT_SPEC
+
     def test_legacy_no_context(self, client):
         test_client, _, mock_rag, mock_openai = client
 
@@ -402,7 +409,7 @@ class TestLegacyRequest:
         body = response.json()
         assert body["answer"] == "mocked rag answer"
         assert body["context_used"] is False
-        assert body["route_used"] == "kb_only"
+        assert body["route_used"] == "regulatory_only"
         assert body["grounded"] is True
         assert body["citations"]
         assert body["citations"][0]["source"] == "NEPM_2013.pdf"
@@ -427,7 +434,7 @@ class TestLegacyRequest:
         assert second.status_code == 200
         assert second.json()["session_id"] == session_id
         assert second.json()["context_used"] is False
-        assert second.json()["route_used"] == "kb_only"
+        assert second.json()["route_used"] == "regulatory_only"
         mock_openai.assert_not_awaited()
         assert mock_rag.aquery.await_count == 2
 
@@ -448,12 +455,13 @@ class TestContextCompatibility:
         assert response.status_code == 200
         body = response.json()
         assert body["context_used"] is True
-        assert body["route_used"] == "project_only"
-        assert body["grounded"] is False
-        assert body["citations"] == []
-        assert body["answer"] == "The selected criteria are NEPM 2013 HIL-A."
-        mock_rag.aquery.assert_not_awaited()
-        assert mock_openai.await_count == 1
+        assert body["route_used"] == "hybrid"
+        assert body["grounded"] is True
+        assert body["citations"]
+        assert body["answer"] == "For this site, the selected criterion is NEPM 2013 HIL-A.\n\nmocked rag answer"
+        mock_rag.aquery.assert_awaited_once()
+        assert mock_rag.aquery.await_args.args[0] == "What criteria have I selected?"
+        mock_openai.assert_not_awaited()
 
     def test_flat_schema_context_normalises_for_endpoint(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -511,7 +519,7 @@ class TestContextCompatibility:
 
         assert response.status_code == 200
         assert response.json()["context_used"] is False
-        assert response.json()["route_used"] == "kb_only"
+        assert response.json()["route_used"] == "regulatory_only"
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
 
@@ -525,7 +533,7 @@ class TestContextCompatibility:
 
         assert response.status_code == 200
         assert response.json()["context_used"] is False
-        assert response.json()["route_used"] == "kb_only"
+        assert response.json()["route_used"] == "regulatory_only"
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
 
@@ -564,7 +572,7 @@ class TestRoutingBehaviour:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "kb_only"
+        assert body["route_used"] == "regulatory_only"
         assert body["grounded"] is True
         assert body["citations"]
         mock_openai.assert_not_awaited()
@@ -587,7 +595,7 @@ class TestRoutingBehaviour:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "kb_only"
+        assert body["route_used"] == "regulatory_only"
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
@@ -609,14 +617,50 @@ class TestRoutingBehaviour:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "kb_only"
+        assert body["route_used"] == "regulatory_only"
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
         assert rag_query == "What does the NEPM say about asbestos?"
-        assert "Matched analytes:" not in rag_query
-        assert "Selected criteria:" not in rag_query
+
+    def test_explicit_site_rejection_forces_regulatory_only(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "I dont care about the site, whats in the NEPM",
+                "context": _benzene_hsl_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "regulatory_only"
+        assert body["answer"] == "mocked rag answer"
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        assert mock_rag.aquery.await_args.args[0] == "I dont care about the site, whats in the NEPM"
+
+    def test_generic_nepm_exceedance_criteria_question_stays_kb_only(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What NEPM exceedance criterias can you tell me the values for",
+                "context": _full_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "regulatory_only"
+        mock_openai.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert rag_query == "What NEPM exceedance criterias can you tell me the values for"
 
     def test_trh_source_question_forces_blended(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -631,17 +675,14 @@ class TestRoutingBehaviour:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "blended"
+        assert body["route_used"] == "hybrid"
         assert body["grounded"] is True
         assert body["citations"]
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
         mock_openai.assert_not_awaited()
-        assert "Regulations: NEPM 2013" in rag_query
-        assert "Sample BH-TRH-01 (0-0.5m)" in rag_query
-        assert "TRH C6-C10 less BTEX=320 mg/kg" in rag_query
-        assert "BTEX=10 mg/kg" not in rag_query
-        assert "F1=90 mg/kg" not in rag_query
+        assert rag_query == "What is the TRH contamination from?"
+        assert body["answer"] == "For this site, the selected criterion is NEPM 2013 HSL-A.\n\nmocked rag answer"
 
     def test_nepm_analyte_question_hits_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -656,16 +697,13 @@ class TestRoutingBehaviour:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "blended"
+        assert body["route_used"] == "hybrid"
         assert body["grounded"] is True
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
         mock_openai.assert_not_awaited()
-        assert "What does the NEPM say about TRH C6-C10?" in rag_query
-        assert "Criterion NEPM 2013 HSL-A: TRH C6-C10=100 mg/kg" in rag_query
-        assert "TRH C6-C10 less BTEX=90 mg/kg" not in rag_query
-        assert "BTEX=15 mg/kg" not in rag_query
-        assert "F1=75 mg/kg" not in rag_query
+        assert rag_query == "What does the NEPM say about TRH C6-C10?"
+        assert body["answer"] == "For this site, the selected criterion is NEPM 2013 HSL-A, with TRH C6-C10 at 100 mg/kg.\n\nmocked rag answer"
 
     def test_direct_criterion_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -684,11 +722,14 @@ class TestRoutingBehaviour:
         assert response.status_code == 200
         body = response.json()
         assert "0.5 mg/kg" in body["answer"]
-        assert body["route_used"] == "project_only"
-        assert body["grounded"] is False
-        assert body["citations"] == []
+        assert body["route_used"] == "hybrid"
+        assert body["grounded"] is True
+        assert body["citations"]
         mock_openai.assert_not_awaited()
-        mock_rag.aquery.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        assert mock_rag.aquery.await_args.args[0] == (
+            "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m) - whats the benzene exceedance value?"
+        )
 
     def test_broad_hsl_question_uses_blended_not_single_applied_value(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -703,14 +744,37 @@ class TestRoutingBehaviour:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "blended"
+        assert body["route_used"] == "hybrid"
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert "What are the criteria values in the HSL for benzene in the NEPM all soil types?" in rag_query
-        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" not in rag_query
-        assert "Applicable criteria: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)" not in rag_query
+        assert rag_query == "What are the criteria values in the HSL for benzene in the NEPM all soil types?"
+        assert body["answer"] == (
+            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m), with Benzene at 0.5 mg/kg.\n\n"
+            "mocked rag answer"
+        )
+
+    def test_hybrid_query_sent_to_rag_is_clean_user_question_only(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What is the HSL for benzene?",
+                "context": _benzene_hsl_context(),
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "hybrid"
+        assert mock_rag.aquery.await_args.args[0] == "What is the HSL for benzene?"
+        assert body["answer"] == (
+            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m), with Benzene at 0.5 mg/kg.\n\n"
+            "mocked rag answer"
+        )
+        mock_openai.assert_not_awaited()
 
     def test_non_selected_soil_type_does_not_collapse_to_selected_hsl(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -725,18 +789,16 @@ class TestRoutingBehaviour:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "blended"
+        assert body["route_used"] == "hybrid"
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert "What is the exceedance threshold for benzene in clay as per the HSL?" in rag_query
-        assert "Context bot handoff:" in rag_query
-        assert "Matched project analytes: Benzene" in rag_query
-        assert "Requested scope markers from the user question: clay" in rag_query
-        assert "Do not answer using the selected project criterion alone as if it were the requested scope." in rag_query
-        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" not in rag_query
-        assert "Applicable criteria: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)" not in rag_query
+        assert rag_query == "What is the exceedance threshold for benzene in clay as per the HSL?"
+        assert body["answer"] == (
+            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m), with Benzene at 0.5 mg/kg.\n\n"
+            "mocked rag answer"
+        )
 
     def test_eil_criterion_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -752,11 +814,12 @@ class TestRoutingBehaviour:
         assert response.status_code == 200
         body = response.json()
         assert "0.08 mg/L" in body["answer"]
-        assert body["route_used"] == "project_only"
-        assert body["grounded"] is False
-        assert body["citations"] == []
+        assert body["route_used"] == "hybrid"
+        assert body["grounded"] is True
+        assert body["citations"]
         mock_openai.assert_not_awaited()
-        mock_rag.aquery.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        assert mock_rag.aquery.await_args.args[0] == "What's the exceedance value for benzene in the EIL?"
 
     def test_management_limit_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -772,11 +835,12 @@ class TestRoutingBehaviour:
         assert response.status_code == 200
         body = response.json()
         assert "0.08 mg/L" in body["answer"]
-        assert body["route_used"] == "project_only"
-        assert body["grounded"] is False
-        assert body["citations"] == []
+        assert body["route_used"] == "hybrid"
+        assert body["grounded"] is True
+        assert body["citations"]
         mock_openai.assert_not_awaited()
-        mock_rag.aquery.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        assert mock_rag.aquery.await_args.args[0] == "What's the management limit for benzene in the EIL?"
 
     def test_investigation_level_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -792,9 +856,11 @@ class TestRoutingBehaviour:
         assert response.status_code == 200
         body = response.json()
         assert "0.08 mg/L" in body["answer"]
-        assert body["route_used"] == "project_only"
+        assert body["route_used"] == "hybrid"
+        assert body["grounded"] is True
         mock_openai.assert_not_awaited()
-        mock_rag.aquery.assert_not_awaited()
+        mock_rag.aquery.assert_awaited_once()
+        assert mock_rag.aquery.await_args.args[0] == "What's the investigation level for benzene in the EIL?"
 
     def test_invalid_extraction_json_falls_back_to_safe_blended_route(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -809,12 +875,10 @@ class TestRoutingBehaviour:
         )
 
         assert response.status_code == 200
-        assert response.json()["route_used"] == "blended"
+        assert response.json()["route_used"] == "hybrid"
         rag_query = mock_rag.aquery.await_args.args[0]
-        mock_openai.assert_not_awaited()
-        assert "What is the TRH contamination from?" in rag_query
-        assert "BTEX=10 mg/kg" not in rag_query
-        assert "F1=90 mg/kg" not in rag_query
+        assert mock_openai.await_count == 0
+        assert rag_query == "What is the TRH contamination from?"
 
     def test_project_hsl_guidance_routes_blended_with_selected_criteria(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -829,13 +893,15 @@ class TestRoutingBehaviour:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "blended"
+        assert body["route_used"] == "hybrid"
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert "Context bot handoff:" in rag_query
-        assert "Applicable criteria: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)" in rag_query
-        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" in rag_query
+        assert rag_query == "Tell me about the HSL criteria for this project"
+        assert body["answer"] == (
+            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m).\n\n"
+            "mocked rag answer"
+        )
 
     def test_waste_classification_for_project_routes_blended(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -850,11 +916,12 @@ class TestRoutingBehaviour:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "blended"
+        assert body["route_used"] == "hybrid"
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert "Applicable criteria: EIL Freshwater Investigation Level" in rag_query
+        assert rag_query == "Tell me about waste classification for this project"
+        assert body["answer"] == "For this site, the selected criterion is EIL Freshwater Investigation Level.\n\nmocked rag answer"
 
     def test_scope_follow_up_keeps_previous_analyte_and_routes_blended(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -879,13 +946,16 @@ class TestRoutingBehaviour:
 
         assert second.status_code == 200
         body = second.json()
-        assert body["route_used"] == "blended"
+        assert body["route_used"] == "hybrid"
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
-        assert mock_rag.aquery.await_count == 1
+        assert mock_rag.aquery.await_count == 2
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert "What are the criteria values in the HSL for benzene? in the NEPM all soil types" in rag_query
-        assert "Criterion EPM 2013 HSL-A Low Density Residential Sand (0m to <1m): Benzene=0.5 mg/kg" not in rag_query
+        assert rag_query == "What are the criteria values in the HSL for benzene? in the NEPM all soil types"
+        assert body["answer"] == (
+            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m), with Benzene at 0.5 mg/kg.\n\n"
+            "mocked rag answer"
+        )
 
 
 class TestResponseContract:
@@ -899,7 +969,7 @@ class TestResponseContract:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["route_used"] == "kb_only"
+        assert body["route_used"] == "regulatory_only"
         assert body["grounded"] is True
         assert body["citations"]
         assert body["citations"][0] == {
