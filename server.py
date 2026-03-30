@@ -251,6 +251,45 @@ GENERIC_REGULATION_TOKENS = {
 }
 MAX_CITATIONS = 4
 MAX_SNIPPET_LENGTH = 220
+DOCUMENT_SCOPE_PATTERNS = (
+    "all soil types",
+    "all land uses",
+    "all values",
+    "for each soil type",
+    "for each land use",
+    "across the nepm",
+    "in the nepm",
+    "across nepm",
+    "compare",
+    "comparison",
+    "table",
+    "full table",
+    "all hsl",
+    "all hil",
+    "all esl",
+    "all eil",
+)
+APPLIED_SCOPE_TERMS = (
+    "applied",
+    "selected",
+    "this project",
+    "this site",
+    "our project",
+    "my project",
+    "for this project",
+    "for this site",
+)
+FOLLOW_UP_SCOPE_PREFIXES = (
+    "in the",
+    "across",
+    "for all",
+    "all ",
+    "under",
+    "compare",
+    "what about",
+    "and ",
+    "or ",
+)
 
 
 @dataclass
@@ -426,6 +465,46 @@ def _question_targets_criterion_lookup(question: str) -> bool:
     return any(term in normalised for term in CRITERION_LOOKUP_TERMS) and any(
         term in normalised for term in CRITERION_VALUE_TERMS
     )
+
+
+def _question_requests_document_scope(question: str) -> bool:
+    normalised = _normalise_text(question)
+    return any(pattern in normalised for pattern in DOCUMENT_SCOPE_PATTERNS)
+
+
+def _question_requests_applied_scope(question: str) -> bool:
+    normalised = _normalise_text(question)
+    return any(term in normalised for term in APPLIED_SCOPE_TERMS)
+
+
+def _should_expand_follow_up_question(question: str, history: list[dict]) -> bool:
+    if not history:
+        return False
+
+    normalised = _normalise_text(question)
+    token_count = len(re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)?", normalised))
+    if token_count <= 4:
+        return True
+
+    return any(normalised.startswith(prefix) for prefix in FOLLOW_UP_SCOPE_PREFIXES)
+
+
+def _build_effective_question(question: str, history: list[dict]) -> str:
+    if not _should_expand_follow_up_question(question, history):
+        return question
+
+    last_user_question = next(
+        (
+            message["content"]
+            for message in reversed(history)
+            if message.get("role") == "user" and message.get("content")
+        ),
+        None,
+    )
+    if not last_user_question:
+        return question
+
+    return f"{last_user_question} {question}".strip()
 
 
 def _iter_thresholds(ctx: WorkspaceContext):
@@ -611,6 +690,8 @@ def _is_deterministic_project_fact_question(question: str, ctx: WorkspaceContext
     question_key = _normalise_text(question)
     if _is_interpretive_question(question, ctx):
         return False
+    if _question_requests_document_scope(question):
+        return False
     if _question_targets_criterion_lookup(question):
         return True
     if any(pattern in question_key for pattern in PROJECT_FACT_PATTERNS):
@@ -775,6 +856,8 @@ def _find_matching_threshold(question: str, ctx: WorkspaceContext, analyte: str)
 
 def _try_answer_direct_criterion_lookup(question: str, ctx: WorkspaceContext) -> str | None:
     if not _question_targets_criterion_lookup(question):
+        return None
+    if _question_requests_document_scope(question) and not _question_requests_applied_scope(question):
         return None
 
     project_state = ctx.projectState
@@ -1048,11 +1131,12 @@ async def query(req: QueryRequest):
             conversation_prefix = "Previous conversation:\n" + "\n".join(context_parts) + "\n\n"
 
         result = None
-        rag_query = conversation_prefix + req.question if conversation_prefix else req.question
+        effective_question = _build_effective_question(req.question, history)
+        rag_query = conversation_prefix + effective_question if conversation_prefix else effective_question
 
         if context_used:
             direct_context_answer = _try_answer_direct_criterion_lookup(
-                req.question, req.context
+                effective_question, req.context
             )
             if direct_context_answer:
                 result = direct_context_answer
@@ -1060,12 +1144,12 @@ async def query(req: QueryRequest):
 
         if context_used and result is None:
             grounded_question = resolve_grounded_question(
-                req.question,
+                effective_question,
                 req.context,
                 ignored_tokens=GENERIC_REGULATION_TOKENS,
             )
             guardrails = build_route_guardrails(
-                req.question,
+                effective_question,
                 req.context,
                 grounded_question,
             )
@@ -1092,7 +1176,7 @@ async def query(req: QueryRequest):
                     )
 
                 extraction_prompt = (
-                    f"User question: {req.question}\n\n"
+                    f"User question: {effective_question}\n\n"
                     f"{' '.join(extraction_notes)}\n\n"
                     f"Grounded project context JSON:\n"
                     f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
@@ -1126,7 +1210,7 @@ async def query(req: QueryRequest):
 
             if route_used == "project_only":
                 answer_prompt = (
-                    f"User question: {req.question}\n\n"
+                    f"User question: {effective_question}\n\n"
                     f"Relevant project context JSON:\n"
                     f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
                 )
@@ -1137,10 +1221,10 @@ async def query(req: QueryRequest):
                     api_key=os.getenv("OPENAI_API_KEY"),
                 )
             elif route_used == "kb_only":
-                rag_query = conversation_prefix + req.question
+                rag_query = conversation_prefix + effective_question
             else:
                 rag_query = conversation_prefix + _build_blended_rag_query(
-                    req.question, filtered
+                    effective_question, filtered
                 )
         if not context_used:
             route_used = "kb_only"
