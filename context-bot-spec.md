@@ -217,3 +217,77 @@ Use these to validate the implementation:
 | 6 | "What's the weather today?" | Any | Reject | N/A | N/A |
 | 7 | "Explain HSL-A vs HSL-D" | Loaded (any) | C (Regulatory-only) | N/A | Original question |
 | 8 | "Do my results exceed the HIL-A for arsenic?" | Loaded, arsenic data present | B (Hybrid) | "Arsenic at [boreholes]: [values]. HIL-A = [resolved value]" | "NEPM HIL-A values arsenic" |
+
+---
+
+## 7. `/query` API Contract
+
+The backend owns routing, context filtering, KB query planning, and final response sectioning.
+The frontend must send current workspace state but must not decide regulatory logic.
+
+### Request
+
+```typescript
+interface QueryRequest {
+  question: string;
+  mode?: "hybrid" | "local" | "global" | "naive";
+  session_id?: string | null;
+  context?: WorkspaceContext | null;
+}
+```
+
+`context` is optional for regulatory-only use. When present, it should include the current project state, selected criteria, criteria details, exceedances, project result rows, retrieval context, and recent conversation state where available.
+
+### Response
+
+```typescript
+interface QueryResponse {
+  answer: string;
+  mode: string;
+  session_id: string;
+  session_reset: boolean;
+  context_used: boolean;
+  route_used: "project_only" | "hybrid" | "regulatory_only";
+  grounded: boolean;
+  citations: Citation[];
+  sections: {
+    site_context: string | null;
+    regulatory_context: string | null;
+    application: string | null;
+  };
+  debug: {
+    effective_question: string | null;
+    kb_query: string | null;
+    route_reason: string | null;
+    used_project_fields: string[];
+    retrieval_mode: string | null;
+    citation_count: number;
+    citation_sources: string[];
+  };
+}
+```
+
+### Response Semantics
+
+- `answer` is the backwards-compatible display string.
+- `sections.site_context` is project/job context resolved from the supplied workspace only.
+- `sections.regulatory_context` is the independent KB answer.
+- `sections.application` is reserved for a future controlled synthesis layer.
+- `debug.kb_query` is the exact query sent to the knowledge base.
+- `debug.used_project_fields` lists the project context fields used to build the site context.
+- `debug.retrieval_mode`, `debug.citation_count`, and `debug.citation_sources` expose retrieval observability for QA and frontend diagnostics.
+- `citations` apply to `sections.regulatory_context`, not to project context.
+
+For Route B (Hybrid), the backend assembles `answer` in this order:
+
+```text
+Site context
+[sections.site_context]
+
+Regulatory context
+[sections.regulatory_context]
+```
+
+For Route A (Project-only), `sections.site_context` contains the project-only answer and `sections.regulatory_context` is `null`.
+
+For Route C (Regulatory-only), `sections.regulatory_context` contains the KB answer and `sections.site_context` is `null`.

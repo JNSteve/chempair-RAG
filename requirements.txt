@@ -4,5 +4,8 @@ python-dotenv
 sentence-transformers
 numpy
 pydantic
+pypdfium2
+pdfplumber
+pytest
 lightrag-hku==1.4.11
 raganything @ git+https://github.com/HKUDS/RAG-Anything.git

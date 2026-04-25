@@ -290,10 +290,10 @@ def is_deterministic_project_fact_question(grounded: GroundedQuestion) -> bool:
         return False
     if any(pattern in question_key for pattern in DOCUMENT_SCOPE_PATTERNS):
         return False
-    if _mentions_regulation_or_criteria(question_key):
-        return False
     if any(pattern in question_key for pattern in PROJECT_FACT_PATTERNS):
         return True
+    if _mentions_regulation_or_criteria(question_key):
+        return False
     if grounded.matched_sample_codes and any(
         token in question_key for token in ("highest", "lowest", "value", "values", "exceed", "exceedance")
     ):
@@ -352,6 +352,13 @@ def deterministic_route_guardrails(
                 reason="follow_up_inherits_hybrid",
             )
 
+    if is_deterministic_project_fact_question(grounded):
+        return RouteGuardrails(
+            route_hint="project_only",
+            project_only_allowed=True,
+            reason="deterministic_project_fact",
+        )
+
     if mentions_regulation_or_criteria:
         return RouteGuardrails(
             route_hint="hybrid" if (grounded.has_entity_matches or explicit_project_scope) else "regulatory_only",
@@ -371,13 +378,6 @@ def deterministic_route_guardrails(
             route_hint="hybrid" if has_regulatory_framing else "project_only",
             project_only_allowed=not has_regulatory_framing,
             reason="explicit_project_scope",
-        )
-
-    if is_deterministic_project_fact_question(grounded):
-        return RouteGuardrails(
-            route_hint="project_only",
-            project_only_allowed=True,
-            reason="deterministic_project_fact",
         )
 
     if is_interpretive_question(grounded):

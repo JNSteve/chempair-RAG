@@ -17,7 +17,7 @@ import numpy as np
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
 
 from context_models import WorkspaceContext, MAX_CONTEXT_PAYLOAD_BYTES
@@ -309,6 +309,12 @@ FOLLOW_UP_SCOPE_PREFIXES = (
     "and ",
     "or ",
 )
+ANALYTE_QUERY_ALIASES = {
+    "f1": ("TRH C6-C10 less BTEX", "TRH C6-C10"),
+    "trh c6-c10": ("F1", "TRH C6-C10 less BTEX"),
+    "trh c6-c10 less btex": ("F1", "TRH C6-C10"),
+    "btex": ("benzene", "toluene", "ethylbenzene", "xylenes"),
+}
 
 
 @dataclass
@@ -432,6 +438,22 @@ class Citation(BaseModel):
     snippet: str
 
 
+class ResponseSections(BaseModel):
+    site_context: str | None = None
+    regulatory_context: str | None = None
+    application: str | None = None
+
+
+class DebugMetadata(BaseModel):
+    effective_question: str | None = None
+    kb_query: str | None = None
+    route_reason: str | None = None
+    used_project_fields: list[str] = Field(default_factory=list)
+    retrieval_mode: str | None = None
+    citation_count: int = 0
+    citation_sources: list[str] = Field(default_factory=list)
+
+
 class QueryResponse(BaseModel):
     answer: str
     mode: str
@@ -441,6 +463,8 @@ class QueryResponse(BaseModel):
     route_used: str
     grounded: bool
     citations: list[Citation]
+    sections: ResponseSections
+    debug: DebugMetadata
 
 
 def _has_usable_context(ctx: WorkspaceContext) -> bool:
@@ -562,10 +586,10 @@ def _first_matching_selected_threshold(
     filtered: dict,
     ctx: WorkspaceContext,
     question: str,
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, str | None]:
     analyte = _find_question_analyte(question, ctx)
     if not analyte or _normalise_text(analyte) not in _normalise_text(question):
-        return analyte, None
+        return analyte, None, None
     criteria = filtered.get("criteria", {})
     selected_names = {_normalise_text(name) for name in _selected_criterion_names(ctx)}
 
@@ -576,8 +600,207 @@ def _first_matching_selected_threshold(
         for threshold in detail.get("thresholds", []):
             if analyte and _normalise_text(threshold.get("analyte")) != _normalise_text(analyte):
                 continue
-            return analyte, _format_value(threshold.get("value"), threshold.get("unit"))
-    return analyte, None
+            return analyte, _format_value(threshold.get("value"), threshold.get("unit")), detail_name
+    return analyte, None, None
+
+
+def _join_sentence_parts(parts: list[str]) -> str:
+    return "; ".join(part for part in parts if part)
+
+
+def _build_site_context_block(
+    question: str,
+    ctx: WorkspaceContext,
+    filtered: dict,
+) -> tuple[str, list[str]]:
+    used_project_fields: list[str] = []
+    lines: list[str] = []
+    project_state = ctx.projectState
+
+    project = filtered.get("project", {})
+    if project:
+        project_bits = []
+        if project.get("projectName"):
+            project_bits.append(project["projectName"])
+            used_project_fields.append("project.projectName")
+        if project.get("siteName"):
+            project_bits.append(f"site {project['siteName']}")
+            used_project_fields.append("project.siteName")
+        if project.get("labReportNumber"):
+            project_bits.append(f"lab report {project['labReportNumber']}")
+            used_project_fields.append("project.labReportNumber")
+        if project_bits:
+            lines.append(f"Project: {', '.join(project_bits)}.")
+
+    selected = filtered.get("selectedCriteria", {})
+    selected_bits = []
+    if selected.get("applicableCriteria"):
+        selected_bits.append(selected["applicableCriteria"])
+        used_project_fields.append("selectedCriteria.applicableCriteria")
+    if selected.get("landUse"):
+        selected_bits.append(f"land use {selected['landUse']}")
+        used_project_fields.append("selectedCriteria.landUse")
+    if selected.get("state"):
+        selected_bits.append(f"state {selected['state']}")
+        used_project_fields.append("selectedCriteria.state")
+    if selected.get("regulations"):
+        selected_bits.append(f"regulations {', '.join(selected['regulations'])}")
+        used_project_fields.append("selectedCriteria.regulations")
+    if selected_bits:
+        lines.append(f"Selected criteria: {_join_sentence_parts(selected_bits)}.")
+
+    analyte, criterion_value, criterion_name = _first_matching_selected_threshold(
+        filtered,
+        ctx,
+        question,
+    )
+    if analyte and criterion_value:
+        used_project_fields.append("criteria.criteriaDetails.thresholds")
+        criterion_text = f" under {criterion_name}" if criterion_name else ""
+        lines.append(f"Applied project criterion: {analyte} = {criterion_value}{criterion_text}.")
+
+    exceedances = filtered.get("exceedances", [])
+    if exceedances:
+        used_project_fields.append("exceedances")
+        rendered = []
+        for exceedance in exceedances[:5]:
+            analyte_text = exceedance.get("analyte") or "unknown analyte"
+            sample_text = exceedance.get("sampleCode") or "unknown sample"
+            value_text = _format_value(exceedance.get("value"), exceedance.get("unit"))
+            criterion_value_text = _format_value(
+                exceedance.get("criterionValue"),
+                exceedance.get("unit"),
+            )
+            if exceedance.get("criterionValue") is not None:
+                rendered.append(
+                    f"{analyte_text} at {sample_text} = {value_text} "
+                    f"against {criterion_value_text}"
+                )
+            else:
+                rendered.append(f"{analyte_text} at {sample_text} = {value_text}")
+        if rendered:
+            lines.append(f"Relevant exceedances: {'; '.join(rendered)}.")
+
+    relevant_samples = filtered.get("relevantSamples", [])
+    if relevant_samples and not exceedances:
+        used_project_fields.append("relevantSamples")
+        rendered_samples = []
+        for row in relevant_samples[:5]:
+            sample_code = row.get("sampleCode") or "unknown sample"
+            depth = f" at {row['depth']}" if row.get("depth") else ""
+            values = []
+            for item in row.get("analyteValues", [])[:4]:
+                if item.get("analyte"):
+                    values.append(
+                        f"{item['analyte']} {_format_value(item.get('value'), item.get('unit'))}"
+                    )
+            if values:
+                rendered_samples.append(f"{sample_code}{depth}: {', '.join(values)}")
+        if rendered_samples:
+            lines.append(f"Relevant results: {'; '.join(rendered_samples)}.")
+
+    if not lines and project_state:
+        lines.append("Project context was supplied, but no question-specific project values were available.")
+
+    return "\n".join(lines), used_project_fields
+
+
+def _criterion_family_from_question(question: str, selected_criterion: str | None = None) -> str | None:
+    normalised = _normalise_text(question)
+    for family in ("hsl", "hil", "esl", "eil"):
+        if family in normalised:
+            return family.upper()
+    if selected_criterion:
+        match = re.search(r"\b(HSL|HIL|ESL|EIL)\b", selected_criterion, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+    return None
+
+
+def _explicit_question_analyte(question: str, ctx: WorkspaceContext) -> str | None:
+    grounded = resolve_grounded_question(
+        question,
+        ctx,
+        ignored_tokens=GENERIC_REGULATION_TOKENS,
+    )
+    return grounded.matched_analytes[0] if grounded.matched_analytes else None
+
+
+def _document_scope_markers(question: str) -> list[str]:
+    normalised = _normalise_text(question)
+    return [pattern for pattern in DOCUMENT_SCOPE_PATTERNS if pattern in normalised]
+
+
+def _query_aliases_for_analyte(analyte: str | None) -> list[str]:
+    if not analyte:
+        return []
+    aliases = ANALYTE_QUERY_ALIASES.get(_normalise_text(analyte), ())
+    return [alias for alias in aliases if _normalise_text(alias) != _normalise_text(analyte)]
+
+
+def _build_kb_query(question: str, ctx: WorkspaceContext, filtered: dict) -> str:
+    question_key = _normalise_text(question)
+    selected = filtered.get("selectedCriteria", {})
+    selected_criterion = selected.get("applicableCriteria") or (
+        selected.get("criteriaNames") or [None]
+    )[0]
+    regulations = selected.get("regulations") or []
+    regulation_text = ", ".join(regulations) if regulations else None
+    analyte = _explicit_question_analyte(question, ctx)
+    family = _criterion_family_from_question(question, selected_criterion)
+
+    if analyte and (family or regulation_text or selected_criterion):
+        criterion_lookup = _question_targets_criterion_lookup(question)
+        interpretive = any(
+            re.search(pattern, question_key) for pattern in INTERPRETIVE_ROUTE_PATTERNS
+        ) or bool(re.search(r"\bwhat (?:is|are).+\bfrom\b", question_key))
+        interpretive = interpretive and not criterion_lookup
+        if interpretive:
+            leading_terms = [
+                term
+                for term in (
+                    regulation_text,
+                    family,
+                    "guidance for",
+                    analyte,
+                    "contamination interpretation",
+                )
+                if term
+            ]
+        else:
+            leading_terms = [
+                term
+                for term in (regulation_text, family, "criteria values", f"for {analyte}")
+                if term
+            ]
+        parts = [" ".join(leading_terms)]
+        aliases = _query_aliases_for_analyte(analyte)
+        if aliases:
+            parts.append(f"aliases: {', '.join(aliases)}")
+        if selected_criterion:
+            parts.append(f"selected criterion: {selected_criterion}")
+        scope_markers = []
+        if _question_requests_document_scope(question) or question_requests_non_selected_scope(question, ctx):
+            scope_markers.extend(_document_scope_markers(question))
+            scope_markers.extend(_extract_requested_scope_markers(question))
+        if scope_markers:
+            parts.append(f"requested scope: {', '.join(scope_markers)}")
+        parts.append("include table values and units")
+        return "; ".join(parts)
+
+    if family or selected_criterion or regulation_text:
+        leading_terms = [term for term in (regulation_text, family, "guidance") if term]
+        parts = [" ".join(leading_terms) if leading_terms else question]
+        if selected_criterion:
+            parts.append(f"selected criterion: {selected_criterion}")
+        if _question_requests_document_scope(question) or question_requests_non_selected_scope(question, ctx):
+            scope_markers = _document_scope_markers(question) + _extract_requested_scope_markers(question)
+            if scope_markers:
+                parts.append(f"requested scope: {', '.join(scope_markers)}")
+        parts.append("include relevant guidance, table values, and units where applicable")
+        return "; ".join(parts)
+
+    return question
 
 
 def _build_relay_block(
@@ -588,28 +811,7 @@ def _build_relay_block(
 ) -> tuple[str, list[str]]:
     if route != "hybrid":
         return "", []
-
-    used_project_fields: list[str] = []
-    selected = filtered.get("selectedCriteria", {})
-    applicable_criterion = selected.get("applicableCriteria")
-    if applicable_criterion:
-        used_project_fields.append("selectedCriteria.applicableCriteria")
-
-    analyte, criterion_value = _first_matching_selected_threshold(filtered, ctx, question)
-    if criterion_value:
-        used_project_fields.append("criteria.criteriaDetails.thresholds")
-
-    if applicable_criterion and analyte and criterion_value:
-        return (
-            f"For this site, the selected criterion is {applicable_criterion}, with {analyte} at {criterion_value}.",
-            used_project_fields,
-        )
-    if applicable_criterion:
-        return (
-            f"For this site, the selected criterion is {applicable_criterion}.",
-            used_project_fields,
-        )
-    return "", []
+    return _build_site_context_block(question, ctx, filtered)
 
 
 def _build_context_bot_handoff(
@@ -623,7 +825,7 @@ def _build_context_bot_handoff(
     return ContextBotHandoff(
         route=route,
         relay_block=relay_block,
-        kb_query=question,
+        kb_query=_build_kb_query(question, ctx, filtered) if route == "hybrid" else question,
         reason=route_reason or "unspecified",
         used_project_fields=used_project_fields,
     )
@@ -686,7 +888,7 @@ def _run_context_bot(
 def _assemble_isolated_answer(route: str, relay_block: str, kb_answer: str) -> str:
     if route != "hybrid" or not relay_block.strip():
         return kb_answer
-    return f"{relay_block.strip()}\n\n{kb_answer.strip()}"
+    return f"Site context\n{relay_block.strip()}\n\nRegulatory context\n{kb_answer.strip()}"
 
 
 def _iter_thresholds(ctx: WorkspaceContext):
@@ -1109,7 +1311,8 @@ def _file_source_name(file_path: str | None, reference_id: str | None) -> str:
     if file_path:
         cleaned = str(file_path).replace("\\", "/").rstrip("/")
         if cleaned:
-            return cleaned.split("/")[-1]
+            source = cleaned.split("/")[-1]
+            return source.removeprefix("tables_")
     if reference_id:
         return f"reference-{reference_id}"
     return "reference"
@@ -1228,6 +1431,9 @@ async def query(req: QueryRequest):
     route_used = "kb_only"
     grounded = False
     citations: list[dict] = []
+    sections = ResponseSections()
+    debug = DebugMetadata()
+    debug.retrieval_mode = req.mode
 
     if req.context is not None:
         try:
@@ -1266,6 +1472,8 @@ async def query(req: QueryRequest):
         result = None
         effective_question = _build_effective_question(req.question, history)
         rag_query = effective_question
+        debug.effective_question = effective_question
+        handoff = None
 
         if context_used:
             previous_route = sessions.get(session_id, {}).get("last_route")
@@ -1277,6 +1485,9 @@ async def query(req: QueryRequest):
             route_used = context_bot.handoff.route
             filtered = context_bot.filtered_context
             handoff = context_bot.handoff
+            debug.route_reason = handoff.reason
+            debug.kb_query = handoff.kb_query
+            debug.used_project_fields = handoff.used_project_fields
 
             if route_used == "project_only" and result is None:
                 direct_context_answer = _try_answer_direct_criterion_lookup(
@@ -1296,10 +1507,12 @@ async def query(req: QueryRequest):
                         system_prompt=PROJECT_ONLY_ANSWER_SYSTEM,
                         api_key=os.getenv("OPENAI_API_KEY"),
                     )
+                sections.site_context = result
             else:
                 rag_query = handoff.kb_query
         else:
             route_used = "regulatory_only"
+            debug.kb_query = rag_query
 
         if result is None:
             kb_answer = await rag.aquery(
@@ -1309,8 +1522,11 @@ async def query(req: QueryRequest):
             )
             if context_used and route_used == "hybrid":
                 result = _assemble_isolated_answer(route_used, handoff.relay_block, kb_answer)
+                sections.site_context = handoff.relay_block.strip() or None
+                sections.regulatory_context = kb_answer.strip()
             else:
                 result = kb_answer
+                sections.regulatory_context = kb_answer.strip()
             try:
                 citations = await _fetch_rag_citations(rag_query, req.mode)
             except Exception as citation_error:
@@ -1320,6 +1536,8 @@ async def query(req: QueryRequest):
                     citation_error,
                 )
                 citations = []
+            debug.citation_count = len(citations)
+            debug.citation_sources = [citation["source"] for citation in citations]
             grounded = bool(citations)
 
         history.append({"role": "user", "content": req.question})
@@ -1340,6 +1558,8 @@ async def query(req: QueryRequest):
             route_used=route_used,
             grounded=grounded,
             citations=citations,
+            sections=sections,
+            debug=debug,
         )
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error))
