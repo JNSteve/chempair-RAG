@@ -50,6 +50,32 @@ def _sample_grounding_payload() -> dict:
     }
 
 
+def _table_grounding_payload() -> dict:
+    return {
+        "status": "success",
+        "data": {
+            "references": [
+                {
+                    "reference_id": "ref-table",
+                    "file_path": "/kb/tables_NEPM_2013.pdf",
+                }
+            ],
+            "chunks": [
+                {
+                    "reference_id": "ref-table",
+                    "file_path": "/kb/tables_NEPM_2013.pdf",
+                    "chunk_id": "table_page_45_chunk_2",
+                    "content": (
+                        "[Table from NEPM_2013.pdf, page 45]\n"
+                        "Analyte | HSL-A | HSL-B\n"
+                        "Benzene | 0.5 | 1.0"
+                    ),
+                }
+            ],
+        },
+    }
+
+
 def _minimal_context() -> dict:
     return {
         "schemaVersion": 3,
@@ -455,13 +481,14 @@ class TestContextCompatibility:
         assert response.status_code == 200
         body = response.json()
         assert body["context_used"] is True
-        assert body["route_used"] == "hybrid"
-        assert body["grounded"] is True
-        assert body["citations"]
-        assert body["answer"] == "For this site, the selected criterion is NEPM 2013 HIL-A.\n\nmocked rag answer"
-        mock_rag.aquery.assert_awaited_once()
-        assert mock_rag.aquery.await_args.args[0] == "What criteria have I selected?"
-        mock_openai.assert_not_awaited()
+        assert body["route_used"] == "project_only"
+        assert body["grounded"] is False
+        assert body["citations"] == []
+        assert body["answer"] == "The selected criteria are NEPM 2013 HIL-A."
+        assert body["sections"]["site_context"] == "The selected criteria are NEPM 2013 HIL-A."
+        assert body["sections"]["regulatory_context"] is None
+        mock_rag.aquery.assert_not_awaited()
+        mock_openai.assert_awaited_once()
 
     def test_flat_schema_context_normalises_for_endpoint(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -716,8 +743,14 @@ class TestRoutingBehaviour:
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
         mock_openai.assert_not_awaited()
-        assert rag_query == "What is the TRH contamination from?"
-        assert body["answer"] == "For this site, the selected criterion is NEPM 2013 HSL-A.\n\nmocked rag answer"
+        assert rag_query != "What is the TRH contamination from?"
+        assert "TRH C6-C10" in rag_query
+        assert "contamination interpretation" in rag_query
+        assert body["debug"]["kb_query"] == rag_query
+        assert body["sections"]["site_context"].startswith("Project: Hydrocarbon Project")
+        assert "Relevant exceedances: TRH C6-C10 at BH-TRH-01 = 380 mg/kg against 100 mg/kg." in body["sections"]["site_context"]
+        assert body["sections"]["regulatory_context"] == "mocked rag answer"
+        assert body["answer"].startswith("Site context\n")
 
     def test_nepm_analyte_question_hits_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -737,8 +770,12 @@ class TestRoutingBehaviour:
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
         mock_openai.assert_not_awaited()
-        assert rag_query == "What does the NEPM say about TRH C6-C10?"
-        assert body["answer"] == "For this site, the selected criterion is NEPM 2013 HSL-A, with TRH C6-C10 at 100 mg/kg.\n\nmocked rag answer"
+        assert rag_query != "What does the NEPM say about TRH C6-C10?"
+        assert "NEPM 2013" in rag_query
+        assert "TRH C6-C10" in rag_query
+        assert body["debug"]["kb_query"] == rag_query
+        assert "Applied project criterion: TRH C6-C10 = 100 mg/kg under NEPM 2013 HSL-A." in body["sections"]["site_context"]
+        assert body["sections"]["regulatory_context"] == "mocked rag answer"
 
     def test_direct_criterion_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -762,9 +799,10 @@ class TestRoutingBehaviour:
         assert body["citations"]
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
-        assert mock_rag.aquery.await_args.args[0] == (
-            "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m) - whats the benzene exceedance value?"
-        )
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert rag_query.startswith("NEPM 2013 HSL criteria values for Benzene")
+        assert "selected criterion: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)" in rag_query
+        assert body["debug"]["kb_query"] == rag_query
 
     def test_broad_hsl_question_uses_blended_not_single_applied_value(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -784,11 +822,10 @@ class TestRoutingBehaviour:
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert rag_query == "What are the criteria values in the HSL for benzene in the NEPM all soil types?"
-        assert body["answer"] == (
-            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m), with Benzene at 0.5 mg/kg.\n\n"
-            "mocked rag answer"
-        )
+        assert rag_query.startswith("NEPM 2013 HSL criteria values for Benzene")
+        assert "requested scope: all soil types" in rag_query
+        assert body["sections"]["site_context"].startswith("Project: Project Benzene.")
+        assert body["sections"]["regulatory_context"] == "mocked rag answer"
 
     def test_hybrid_query_sent_to_rag_is_clean_user_question_only(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -804,9 +841,28 @@ class TestRoutingBehaviour:
         assert response.status_code == 200
         body = response.json()
         assert body["route_used"] == "hybrid"
-        assert mock_rag.aquery.await_args.args[0] == "What is the HSL for benzene?"
+        assert mock_rag.aquery.await_args.args[0] == (
+            "NEPM 2013 HSL criteria values for Benzene; "
+            "selected criterion: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m); "
+            "include table values and units"
+        )
+        assert body["debug"]["kb_query"] == mock_rag.aquery.await_args.args[0]
+        assert body["sections"]["site_context"] == (
+            "Project: Project Benzene.\n"
+            "Selected criteria: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m); "
+            "land use Low Density Residential; state QLD; regulations NEPM 2013.\n"
+            "Applied project criterion: Benzene = 0.5 mg/kg under "
+            "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m)."
+        )
+        assert body["sections"]["regulatory_context"] == "mocked rag answer"
         assert body["answer"] == (
-            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m), with Benzene at 0.5 mg/kg.\n\n"
+            "Site context\n"
+            "Project: Project Benzene.\n"
+            "Selected criteria: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m); "
+            "land use Low Density Residential; state QLD; regulations NEPM 2013.\n"
+            "Applied project criterion: Benzene = 0.5 mg/kg under "
+            "EPM 2013 HSL-A Low Density Residential Sand (0m to <1m).\n\n"
+            "Regulatory context\n"
             "mocked rag answer"
         )
         mock_openai.assert_not_awaited()
@@ -829,11 +885,10 @@ class TestRoutingBehaviour:
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert rag_query == "What is the exceedance threshold for benzene in clay as per the HSL?"
-        assert body["answer"] == (
-            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m), with Benzene at 0.5 mg/kg.\n\n"
-            "mocked rag answer"
-        )
+        assert rag_query.startswith("NEPM 2013 HSL criteria values for Benzene")
+        assert "requested scope: clay" in rag_query
+        assert body["sections"]["site_context"].startswith("Project: Project Benzene.")
+        assert body["sections"]["regulatory_context"] == "mocked rag answer"
 
     def test_eil_criterion_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -854,7 +909,13 @@ class TestRoutingBehaviour:
         assert body["citations"]
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
-        assert mock_rag.aquery.await_args.args[0] == "What's the exceedance value for benzene in the EIL?"
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert rag_query == (
+            "NEPM 2013 EIL criteria values for Benzene; "
+            "selected criterion: EIL Freshwater Investigation Level; "
+            "include table values and units"
+        )
+        assert body["debug"]["kb_query"] == rag_query
 
     def test_management_limit_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -875,7 +936,13 @@ class TestRoutingBehaviour:
         assert body["citations"]
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
-        assert mock_rag.aquery.await_args.args[0] == "What's the management limit for benzene in the EIL?"
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert rag_query == (
+            "NEPM 2013 EIL criteria values for Benzene; "
+            "selected criterion: EIL Freshwater Investigation Level; "
+            "include table values and units"
+        )
+        assert body["debug"]["kb_query"] == rag_query
 
     def test_investigation_level_lookup_bypasses_rag(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -895,7 +962,13 @@ class TestRoutingBehaviour:
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         mock_rag.aquery.assert_awaited_once()
-        assert mock_rag.aquery.await_args.args[0] == "What's the investigation level for benzene in the EIL?"
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert rag_query == (
+            "NEPM 2013 EIL criteria values for Benzene; "
+            "selected criterion: EIL Freshwater Investigation Level; "
+            "include table values and units"
+        )
+        assert body["debug"]["kb_query"] == rag_query
 
     def test_invalid_extraction_json_falls_back_to_safe_blended_route(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -913,7 +986,8 @@ class TestRoutingBehaviour:
         assert response.json()["route_used"] == "hybrid"
         rag_query = mock_rag.aquery.await_args.args[0]
         assert mock_openai.await_count == 0
-        assert rag_query == "What is the TRH contamination from?"
+        assert "TRH C6-C10" in rag_query
+        assert "contamination interpretation" in rag_query
 
     def test_project_hsl_guidance_routes_blended_with_selected_criteria(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -932,11 +1006,13 @@ class TestRoutingBehaviour:
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert rag_query == "Tell me about the HSL criteria for this project"
-        assert body["answer"] == (
-            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m).\n\n"
-            "mocked rag answer"
+        assert rag_query == (
+            "NEPM 2013 HSL guidance; "
+            "selected criterion: EPM 2013 HSL-A Low Density Residential Sand (0m to <1m); "
+            "include relevant guidance, table values, and units where applicable"
         )
+        assert body["sections"]["site_context"].startswith("Project: Project Benzene.")
+        assert body["sections"]["regulatory_context"] == "mocked rag answer"
 
     def test_waste_classification_for_project_routes_blended(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -955,8 +1031,13 @@ class TestRoutingBehaviour:
         assert body["grounded"] is True
         mock_openai.assert_not_awaited()
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert rag_query == "Tell me about waste classification for this project"
-        assert body["answer"] == "For this site, the selected criterion is EIL Freshwater Investigation Level.\n\nmocked rag answer"
+        assert rag_query == (
+            "NEPM 2013 EIL guidance; "
+            "selected criterion: EIL Freshwater Investigation Level; "
+            "include relevant guidance, table values, and units where applicable"
+        )
+        assert body["sections"]["site_context"].startswith("Project: Project EIL.")
+        assert body["sections"]["regulatory_context"] == "mocked rag answer"
 
     def test_scope_follow_up_keeps_previous_analyte_and_routes_blended(self, client):
         test_client, _, mock_rag, mock_openai = client
@@ -986,11 +1067,30 @@ class TestRoutingBehaviour:
         mock_openai.assert_not_awaited()
         assert mock_rag.aquery.await_count == 2
         rag_query = mock_rag.aquery.await_args.args[0]
-        assert rag_query == "What are the criteria values in the HSL for benzene? in the NEPM all soil types"
-        assert body["answer"] == (
-            "For this site, the selected criterion is EPM 2013 HSL-A Low Density Residential Sand (0m to <1m), with Benzene at 0.5 mg/kg.\n\n"
-            "mocked rag answer"
+        assert rag_query.startswith("NEPM 2013 HSL criteria values for Benzene")
+        assert "requested scope: all soil types" in rag_query
+        assert body["sections"]["site_context"].startswith("Project: Project Benzene.")
+        assert body["sections"]["regulatory_context"] == "mocked rag answer"
+
+    def test_fraction_aliases_are_added_to_kb_query(self, client):
+        test_client, _, mock_rag, mock_openai = client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What does the NEPM say about F1?",
+                "context": _trh_context(),
+            },
         )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["route_used"] == "hybrid"
+        mock_openai.assert_not_awaited()
+        rag_query = mock_rag.aquery.await_args.args[0]
+        assert "F1" in rag_query
+        assert "TRH C6-C10 less BTEX" in rag_query
+        assert body["debug"]["kb_query"] == rag_query
 
 
 class TestResponseContract:
@@ -1016,6 +1116,36 @@ class TestResponseContract:
                 "should be assessed against the selected land use criteria in the NEPM."
             ),
         }
+        assert body["debug"]["retrieval_mode"] == "hybrid"
+        assert body["debug"]["citation_count"] == 1
+        assert body["debug"]["citation_sources"] == ["NEPM_2013.pdf"]
+
+    def test_table_ingestion_citations_are_normalised(self, client):
+        test_client, _, mock_rag, _ = client
+        mock_rag.lightrag.aquery_data.return_value = _table_grounding_payload()
+
+        response = test_client.post(
+            "/query",
+            json={"question": "What is the HSL-A value for benzene?"},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["citations"][0]["source"] == "NEPM_2013.pdf"
+        assert body["citations"][0]["title"] == "NEPM 2013"
+        assert body["citations"][0]["locator"] == "p. 45"
+        assert body["debug"]["citation_sources"] == ["NEPM_2013.pdf"]
+
+    def test_requirements_include_ingestion_and_test_dependencies(self):
+        requirements = {
+            line.strip().split("==")[0].split(">=")[0].lower()
+            for line in open("requirements.txt", encoding="utf-8")
+            if line.strip() and not line.startswith("#")
+        }
+
+        assert "pypdfium2" in requirements
+        assert "pdfplumber" in requirements
+        assert "pytest" in requirements
 
     def test_project_only_metadata_returns_empty_citations(self, client):
         test_client, _, _, mock_openai = client
