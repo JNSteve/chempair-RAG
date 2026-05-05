@@ -392,7 +392,10 @@ def _trh_context() -> dict:
 
 @pytest.fixture()
 def client():
-    with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}):
+    with patch.dict(
+        "os.environ",
+        {"OPENAI_API_KEY": "test-key", "RAG_AUTH_REQUIRED": "false"},
+    ):
         import server
 
         server.app.router.on_startup.clear()
@@ -413,6 +416,96 @@ def client():
                 yield test_client, server, mock_rag, mock_openai
 
         server.sessions.clear()
+
+
+@pytest.fixture()
+def secure_client():
+    with patch.dict(
+        "os.environ",
+        {
+            "OPENAI_API_KEY": "test-key",
+            "RAG_AUTH_REQUIRED": "true",
+            "RAG_API_KEY": "secret-rag-token",
+        },
+    ):
+        import server
+
+        server.app.router.on_startup.clear()
+        server.app.router.on_shutdown.clear()
+        server.sessions.clear()
+
+        mock_rag = MagicMock()
+        mock_rag.aquery = AsyncMock(return_value="mocked rag answer")
+        mock_rag.lightrag = MagicMock()
+        mock_rag.lightrag.aquery_data = AsyncMock(
+            return_value=_sample_grounding_payload()
+        )
+
+        server.rag = mock_rag
+        with TestClient(server.app, raise_server_exceptions=False) as test_client:
+            yield test_client, server, mock_rag
+
+        server.sessions.clear()
+
+
+class TestSecurityHardening:
+    def test_query_requires_configured_api_key(self, secure_client):
+        test_client, _, mock_rag = secure_client
+
+        response = test_client.post(
+            "/query",
+            json={"question": "What are the soil guidelines?", "mode": "hybrid"},
+        )
+
+        assert response.status_code == 401
+        mock_rag.aquery.assert_not_awaited()
+
+    def test_query_accepts_valid_bearer_token(self, secure_client):
+        test_client, _, mock_rag = secure_client
+
+        response = test_client.post(
+            "/query",
+            json={"question": "What are the soil guidelines?", "mode": "hybrid"},
+            headers={"Authorization": "Bearer secret-rag-token"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["answer"] == "mocked rag answer"
+        mock_rag.aquery.assert_awaited_once()
+
+    def test_unknown_client_supplied_session_id_is_not_created(self, secure_client):
+        test_client, _, _ = secure_client
+
+        response = test_client.post(
+            "/query",
+            json={
+                "question": "What are the soil guidelines?",
+                "session_id": "attacker-known-session",
+            },
+            headers={"Authorization": "Bearer secret-rag-token"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["session_id"] != "attacker-known-session"
+
+        history = test_client.get(
+            "/session/attacker-known-session/history",
+            headers={"Authorization": "Bearer secret-rag-token"},
+        )
+        assert history.status_code == 404
+
+    def test_session_history_requires_configured_api_key(self, secure_client):
+        test_client, _, _ = secure_client
+
+        create = test_client.post(
+            "/session/new",
+            headers={"Authorization": "Bearer secret-rag-token"},
+        )
+        session_id = create.json()["session_id"]
+
+        response = test_client.get(f"/session/{session_id}/history")
+
+        assert response.status_code == 401
 
 
 class TestLegacyRequest:

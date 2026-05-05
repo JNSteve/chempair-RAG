@@ -6,6 +6,7 @@ Supports conversational sessions so users can refine questions.
 
 import json
 import logging
+import hmac
 import os
 import re
 import time
@@ -15,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
@@ -47,6 +48,13 @@ EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 SESSION_TTL = 3600
 MAX_EXCHANGES = 3
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+)
+FALSE_ENV_VALUES = {"0", "false", "no", "off"}
 
 logger = logging.getLogger("chempair.query")
 CONTEXT_BOT_SPEC_PATH = Path(__file__).with_name("context-bot-spec.md")
@@ -60,6 +68,64 @@ def _load_context_bot_spec() -> str:
 
 
 CONTEXT_BOT_SPEC = _load_context_bot_spec()
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in FALSE_ENV_VALUES
+
+
+def _configured_api_keys() -> list[str]:
+    raw = os.getenv("RAG_API_KEYS") or os.getenv("RAG_API_KEY") or ""
+    return [key.strip() for key in raw.split(",") if key.strip()]
+
+
+def _extract_bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def _has_valid_api_key(candidate: str | None, configured_keys: list[str]) -> bool:
+    if not candidate:
+        return False
+    return any(hmac.compare_digest(candidate, key) for key in configured_keys)
+
+
+async def require_rag_auth(
+    authorization: str | None = Header(default=None),
+    x_rag_api_key: str | None = Header(default=None),
+) -> None:
+    if not _env_flag("RAG_AUTH_REQUIRED", True):
+        return
+
+    configured_keys = _configured_api_keys()
+    if not configured_keys:
+        raise HTTPException(
+            status_code=503,
+            detail="RAG API auth is required but no API key is configured",
+        )
+
+    bearer = _extract_bearer_token(authorization)
+    if _has_valid_api_key(bearer, configured_keys) or _has_valid_api_key(
+        x_rag_api_key, configured_keys
+    ):
+        return
+
+    raise HTTPException(status_code=401, detail="RAG API authentication required")
+
+
+def _allowed_origins_from_env() -> list[str]:
+    raw = os.getenv("RAG_ALLOWED_ORIGINS")
+    if raw is None:
+        return list(DEFAULT_ALLOWED_ORIGINS)
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or list(DEFAULT_ALLOWED_ORIGINS)
 
 ALFIE_USER_PROMPT = (
     "You are Alfie, a senior Australian environmental scientist. "
@@ -345,7 +411,7 @@ def get_or_create_session(session_id: str | None) -> tuple[str, list[dict]]:
         sessions[session_id]["last_used"] = time.time()
         return session_id, sessions[session_id]["history"]
 
-    new_id = session_id or str(uuid.uuid4())
+    new_id = str(uuid.uuid4())
     sessions[new_id] = {"history": [], "last_used": time.time()}
     return new_id, sessions[new_id]["history"]
 
@@ -386,10 +452,11 @@ def llm_model_func(prompt, system_prompt=None, history_messages=[], **kwargs):
 
 app = FastAPI(title="Chempair RAG API", description="Environmental regulatory document Q&A")
 
+allowed_origins = _allowed_origins_from_env()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials="*" not in allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1421,7 +1488,7 @@ async def _fetch_rag_citations(query: str, mode: str) -> list[dict]:
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query(req: QueryRequest):
+async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
     if not rag:
         raise HTTPException(status_code=503, detail="RAG not initialized")
 
@@ -1566,21 +1633,21 @@ async def query(req: QueryRequest):
 
 
 @app.post("/session/new")
-async def new_session():
+async def new_session(_auth: None = Depends(require_rag_auth)):
     session_id = str(uuid.uuid4())
     sessions[session_id] = {"history": [], "last_used": time.time()}
     return {"session_id": session_id}
 
 
 @app.get("/session/{session_id}/history")
-async def get_history(session_id: str):
+async def get_history(session_id: str, _auth: None = Depends(require_rag_auth)):
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"session_id": session_id, "history": sessions[session_id]["history"]}
 
 
 @app.delete("/session/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, _auth: None = Depends(require_rag_auth)):
     if session_id in sessions:
         del sessions[session_id]
     return {"status": "deleted"}
