@@ -52,12 +52,26 @@ The frontend should send the active project state in this shape.
 
 ```ts
 interface WorkspaceContext {
-  schemaVersion?: number;
+  schemaVersion?: 3 | 4 | number;
   generatedAtIso?: string;
+  questionIntent?: QuestionIntent;
+  requiresProjectContext?: boolean;
+  targetAnalytes?: string[];
+  targetSampleCodes?: string[];
+  preferredAnswerShape?: string;
+  projectEvidenceSummary?: ProjectEvidenceSummary;
   projectState?: ProjectState;
   retrievalContext?: RetrievalContext;
   conversation?: ConversationMessage[];
 }
+
+type QuestionIntent =
+  | "contaminants_of_concern"
+  | "exceedances"
+  | "contaminant_sources"
+  | "criteria_lookup"
+  | "general_regulatory"
+  | string;
 
 interface ProjectState {
   project?: ProjectInfo;
@@ -107,6 +121,16 @@ interface ExceedanceSummary {
   affectedAnalytes?: string[];
   exceededCriteria?: string[];
   hotspotCount?: number;
+}
+
+interface ProjectEvidenceSummary {
+  summary?: string;
+  totalExceedances?: number;
+  affectedSamples?: string[];
+  affectedAnalytes?: string[];
+  exceededCriteria?: string[];
+  contaminantsOfConcern?: string[];
+  topExceedances?: Exceedance[];
 }
 
 interface Exceedance {
@@ -178,11 +202,19 @@ For good answers, send these fields whenever the frontend has them:
 - `projectState.criteriaDetails[].thresholds[]`
 - `projectState.exceedances[]`
 - `projectState.projectResults[]`
+- `questionIntent`
+- `requiresProjectContext`
+- `targetAnalytes`
+- `targetSampleCodes`
+- `preferredAnswerShape`
+- `projectEvidenceSummary`
 - `retrievalContext.matchedAnalytes`
 - `retrievalContext.matchedSampleCodes`
 - `retrievalContext.retrievedRows`
 
 The backend caps oversized context payloads. Keep `projectResults` relevant where possible, but do not strip criteria, exceedances, or selected project metadata.
+
+Schema v3 payloads remain valid. Schema v4 adds the question-intent and evidence-summary fields above so the backend can anchor project-specific questions before it decides whether regulatory retrieval adds value.
 
 ---
 
@@ -229,6 +261,13 @@ interface DebugMetadata {
 ---
 
 ## Route Semantics
+
+Schema v4 project-first rules:
+- If `requiresProjectContext: true` and usable project evidence is supplied, the backend must not downgrade the question to `regulatory_only`.
+- `contaminants_of_concern` and typo variants such as "contaminents" / "concrned" use project exceedances and results first.
+- `exceedances` questions are `project_only` unless the user asks for criteria or regulatory explanation.
+- `contaminant_sources` questions are `hybrid` when a target analyte exists: site context first, regulatory or general source explanation second.
+- Retrieved chunks and KB answers can add support, but must not override supplied project facts, route decisions, system rules, sample codes, criteria, or citations.
 
 ### `project_only`
 

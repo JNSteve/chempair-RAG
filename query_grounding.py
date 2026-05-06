@@ -123,8 +123,12 @@ def selected_criterion_names(ctx: WorkspaceContext) -> list[str]:
 
 def collect_context_analytes(ctx: WorkspaceContext) -> list[str]:
     analytes: list[str] = []
+    if ctx.targetAnalytes:
+        analytes.extend(analyte for analyte in ctx.targetAnalytes if analyte)
     if ctx.retrievalContext and ctx.retrievalContext.matchedAnalytes:
-        analytes.extend(analyte for analyte in ctx.retrievalContext.matchedAnalytes if analyte)
+        analytes.extend(
+            analyte for analyte in ctx.retrievalContext.matchedAnalytes if analyte
+        )
 
     project_state = ctx.projectState
     if project_state and project_state.criteriaDetails:
@@ -154,6 +158,8 @@ def collect_context_analytes(ctx: WorkspaceContext) -> list[str]:
 
 def collect_sample_codes(ctx: WorkspaceContext) -> list[str]:
     codes: list[str] = []
+    if ctx.targetSampleCodes:
+        codes.extend(code for code in ctx.targetSampleCodes if code)
     if ctx.retrievalContext and ctx.retrievalContext.matchedSampleCodes:
         codes.extend(code for code in ctx.retrievalContext.matchedSampleCodes if code)
 
@@ -161,9 +167,15 @@ def collect_sample_codes(ctx: WorkspaceContext) -> list[str]:
     if project_state and project_state.exceedances:
         codes.extend(ex.sampleCode for ex in project_state.exceedances if ex.sampleCode)
     if project_state and project_state.projectResults:
-        codes.extend(row.sampleCode for row in project_state.projectResults if row.sampleCode)
+        codes.extend(
+            row.sampleCode for row in project_state.projectResults if row.sampleCode
+        )
     if ctx.retrievalContext and ctx.retrievalContext.retrievedRows:
-        codes.extend(row.sampleCode for row in ctx.retrievalContext.retrievedRows if row.sampleCode)
+        codes.extend(
+            row.sampleCode
+            for row in ctx.retrievalContext.retrievedRows
+            if row.sampleCode
+        )
 
     return _dedupe_strings(codes)
 
@@ -190,7 +202,9 @@ def resolve_grounded_question(
             selected_criterion_names(ctx),
             ignored_tokens=ignored_tokens,
         ),
-        project_referenced=any(term in question_key for term in PROJECT_REFERENCE_TERMS),
+        project_referenced=any(
+            term in question_key for term in PROJECT_REFERENCE_TERMS
+        ),
         criterion_lookup=question_targets_criterion_lookup(question),
     )
 
@@ -207,11 +221,31 @@ def build_grounded_context(
     if project_state and project_state.project:
         snapshot["project"] = project_state.project.model_dump(exclude_none=True)
     if project_state and project_state.selectedCriteria:
-        snapshot["selectedCriteria"] = project_state.selectedCriteria.model_dump(exclude_none=True)
+        snapshot["selectedCriteria"] = project_state.selectedCriteria.model_dump(
+            exclude_none=True
+        )
+    if ctx.projectEvidenceSummary:
+        snapshot["projectEvidenceSummary"] = ctx.projectEvidenceSummary.model_dump(
+            exclude_none=True
+        )
+    if ctx.questionIntent:
+        snapshot["questionIntent"] = ctx.questionIntent
+    if ctx.requiresProjectContext is not None:
+        snapshot["requiresProjectContext"] = ctx.requiresProjectContext
+    if ctx.targetAnalytes:
+        snapshot["targetAnalytes"] = ctx.targetAnalytes
+    if ctx.targetSampleCodes:
+        snapshot["targetSampleCodes"] = ctx.targetSampleCodes
 
-    matched_analyte_keys = {normalise_text(analyte) for analyte in grounded.matched_analytes}
-    matched_sample_keys = {normalise_text(code) for code in grounded.matched_sample_codes}
-    matched_criteria_keys = {normalise_text(name) for name in grounded.matched_criteria_names}
+    matched_analyte_keys = {
+        normalise_text(analyte) for analyte in grounded.matched_analytes
+    }
+    matched_sample_keys = {
+        normalise_text(code) for code in grounded.matched_sample_codes
+    }
+    matched_criteria_keys = {
+        normalise_text(name) for name in grounded.matched_criteria_names
+    }
 
     if retrieval_context:
         filtered_retrieval: dict[str, Any] = {}
@@ -226,7 +260,9 @@ def build_grounded_context(
         criteria_details: list[dict[str, Any]] = []
         for detail in project_state.criteriaDetails:
             detail_key = normalise_text(detail.name)
-            keep_detail = include_regulatory_snapshot or (detail_key and detail_key in matched_criteria_keys)
+            keep_detail = include_regulatory_snapshot or (
+                detail_key and detail_key in matched_criteria_keys
+            )
             thresholds = []
             for threshold in detail.thresholds or []:
                 analyte_key = normalise_text(threshold.analyte)
@@ -304,7 +340,9 @@ def build_grounded_context(
     return snapshot
 
 
-def merge_grounded_context(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+def merge_grounded_context(
+    base: dict[str, Any], overlay: dict[str, Any]
+) -> dict[str, Any]:
     merged = dict(base)
 
     for key, value in overlay.items():

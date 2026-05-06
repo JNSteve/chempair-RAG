@@ -6,6 +6,7 @@ Supports conversational sessions so users can refine questions.
 
 import json
 import logging
+import hmac
 import os
 import re
 import time
@@ -15,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
@@ -47,6 +48,13 @@ EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 SESSION_TTL = 3600
 MAX_EXCHANGES = 3
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+)
+FALSE_ENV_VALUES = {"0", "false", "no", "off"}
 
 logger = logging.getLogger("chempair.query")
 CONTEXT_BOT_SPEC_PATH = Path(__file__).with_name("context-bot-spec.md")
@@ -60,6 +68,65 @@ def _load_context_bot_spec() -> str:
 
 
 CONTEXT_BOT_SPEC = _load_context_bot_spec()
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in FALSE_ENV_VALUES
+
+
+def _configured_api_keys() -> list[str]:
+    raw = os.getenv("RAG_API_KEYS") or os.getenv("RAG_API_KEY") or ""
+    return [key.strip() for key in raw.split(",") if key.strip()]
+
+
+def _extract_bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+def _has_valid_api_key(candidate: str | None, configured_keys: list[str]) -> bool:
+    if not candidate:
+        return False
+    return any(hmac.compare_digest(candidate, key) for key in configured_keys)
+
+
+async def require_rag_auth(
+    authorization: str | None = Header(default=None),
+    x_rag_api_key: str | None = Header(default=None),
+) -> None:
+    if not _env_flag("RAG_AUTH_REQUIRED", True):
+        return
+
+    configured_keys = _configured_api_keys()
+    if not configured_keys:
+        raise HTTPException(
+            status_code=503,
+            detail="RAG API auth is required but no API key is configured",
+        )
+
+    bearer = _extract_bearer_token(authorization)
+    if _has_valid_api_key(bearer, configured_keys) or _has_valid_api_key(
+        x_rag_api_key, configured_keys
+    ):
+        return
+
+    raise HTTPException(status_code=401, detail="RAG API authentication required")
+
+
+def _allowed_origins_from_env() -> list[str]:
+    raw = os.getenv("RAG_ALLOWED_ORIGINS")
+    if raw is None:
+        return list(DEFAULT_ALLOWED_ORIGINS)
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return origins or list(DEFAULT_ALLOWED_ORIGINS)
+
 
 ALFIE_USER_PROMPT = (
     "You are Alfie, a senior Australian environmental scientist. "
@@ -345,14 +412,18 @@ def get_or_create_session(session_id: str | None) -> tuple[str, list[dict]]:
         sessions[session_id]["last_used"] = time.time()
         return session_id, sessions[session_id]["history"]
 
-    new_id = session_id or str(uuid.uuid4())
+    new_id = str(uuid.uuid4())
     sessions[new_id] = {"history": [], "last_used": time.time()}
     return new_id, sessions[new_id]["history"]
 
 
 def cleanup_sessions():
     now = time.time()
-    expired = [sid for sid, session in sessions.items() if now - session["last_used"] > SESSION_TTL]
+    expired = [
+        sid
+        for sid, session in sessions.items()
+        if now - session["last_used"] > SESSION_TTL
+    ]
     for session_id in expired:
         del sessions[session_id]
 
@@ -384,12 +455,15 @@ def llm_model_func(prompt, system_prompt=None, history_messages=[], **kwargs):
     )
 
 
-app = FastAPI(title="Chempair RAG API", description="Environmental regulatory document Q&A")
+app = FastAPI(
+    title="Chempair RAG API", description="Environmental regulatory document Q&A"
+)
 
+allowed_origins = _allowed_origins_from_env()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials="*" not in allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -543,7 +617,9 @@ def _extract_requested_scope_markers(question: str) -> list[str]:
         if qualifier in normalised and qualifier not in markers:
             markers.append(qualifier)
 
-    depth_markers = re.findall(r"\b\d+\s*(?:-\s*\d+)?\s*m\b|\b<\s*\d+\s*m\b", normalised)
+    depth_markers = re.findall(
+        r"\b\d+\s*(?:-\s*\d+)?\s*m\b|\b<\s*\d+\s*m\b", normalised
+    )
     for marker in depth_markers:
         cleaned = re.sub(r"\s+", " ", marker.strip())
         if cleaned and cleaned not in markers:
@@ -598,14 +674,207 @@ def _first_matching_selected_threshold(
         if detail_name and _normalise_text(detail_name) not in selected_names:
             continue
         for threshold in detail.get("thresholds", []):
-            if analyte and _normalise_text(threshold.get("analyte")) != _normalise_text(analyte):
+            if analyte and _normalise_text(threshold.get("analyte")) != _normalise_text(
+                analyte
+            ):
                 continue
-            return analyte, _format_value(threshold.get("value"), threshold.get("unit")), detail_name
+            return (
+                analyte,
+                _format_value(threshold.get("value"), threshold.get("unit")),
+                detail_name,
+            )
     return analyte, None, None
 
 
 def _join_sentence_parts(parts: list[str]) -> str:
     return "; ".join(part for part in parts if part)
+
+
+def _context_exceedance_summary(ctx: WorkspaceContext) -> dict:
+    if ctx.projectEvidenceSummary:
+        evidence = ctx.projectEvidenceSummary.model_dump(exclude_none=True)
+        if evidence:
+            return evidence
+
+    project_state = ctx.projectState
+    if project_state and project_state.exceedanceSummary:
+        return project_state.exceedanceSummary.model_dump(exclude_none=True)
+    return {}
+
+
+def _context_exceedances(ctx: WorkspaceContext) -> list[dict]:
+    if ctx.projectEvidenceSummary and ctx.projectEvidenceSummary.topExceedances:
+        return [
+            exceedance.model_dump(exclude_none=True)
+            for exceedance in ctx.projectEvidenceSummary.topExceedances
+        ]
+
+    project_state = ctx.projectState
+    if project_state and project_state.exceedances:
+        return [
+            exceedance.model_dump(exclude_none=True)
+            for exceedance in project_state.exceedances
+        ]
+    return []
+
+
+def _contaminants_from_context(ctx: WorkspaceContext) -> list[str]:
+    summary = _context_exceedance_summary(ctx)
+    candidates: list[str] = []
+    for key in ("contaminantsOfConcern", "affectedAnalytes"):
+        value = summary.get(key)
+        if isinstance(value, list):
+            candidates.extend(str(item) for item in value if item)
+
+    if not candidates and ctx.targetAnalytes:
+        candidates.extend(analyte for analyte in ctx.targetAnalytes if analyte)
+
+    for exceedance in _context_exceedances(ctx):
+        analyte = exceedance.get("analyte")
+        if analyte:
+            candidates.append(str(analyte))
+
+    seen: set[str] = set()
+    contaminants: list[str] = []
+    for candidate in candidates:
+        key = _normalise_text(candidate)
+        if not key or key in {"as"} or key in seen:
+            continue
+        seen.add(key)
+        contaminants.append(candidate)
+    return contaminants
+
+
+def _criteria_from_context(ctx: WorkspaceContext) -> list[str]:
+    summary = _context_exceedance_summary(ctx)
+    criteria = []
+    if isinstance(summary.get("exceededCriteria"), list):
+        criteria.extend(str(item) for item in summary["exceededCriteria"] if item)
+
+    project_state = ctx.projectState
+    if project_state and project_state.selectedCriteria:
+        selected = project_state.selectedCriteria
+        if selected.applicableCriteria:
+            criteria.append(selected.applicableCriteria)
+        if selected.criteriaNames:
+            criteria.extend(name for name in selected.criteriaNames if name)
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for criterion in criteria:
+        key = _normalise_text(criterion)
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(criterion)
+    return deduped
+
+
+def _top_exceedance_text(ctx: WorkspaceContext, limit: int = 3) -> str | None:
+    exceedances = _context_exceedances(ctx)
+    if not exceedances:
+        return None
+
+    def sort_key(exceedance: dict) -> float:
+        factor = _coerce_float(exceedance.get("exceedanceFactor"))
+        if factor is not None:
+            return factor
+        value = _coerce_float(exceedance.get("value"))
+        return value if value is not None else 0
+
+    rendered = []
+    for exceedance in sorted(exceedances, key=sort_key, reverse=True)[:limit]:
+        analyte = exceedance.get("analyte") or "unknown analyte"
+        sample = exceedance.get("sampleCode") or "unknown sample"
+        value = _format_value(exceedance.get("value"), exceedance.get("unit"))
+        criterion_value = _format_value(
+            exceedance.get("criterionValue"),
+            exceedance.get("unit"),
+        )
+        if exceedance.get("criterionValue") is not None:
+            rendered.append(
+                f"{analyte} at {sample} = {value} against {criterion_value}"
+            )
+        else:
+            rendered.append(f"{analyte} at {sample} = {value}")
+
+    return "; ".join(rendered) if rendered else None
+
+
+def _try_answer_project_evidence(
+    question: str,
+    ctx: WorkspaceContext,
+    route_reason: str | None,
+) -> tuple[str | None, list[str]]:
+    question_key = _normalise_text(question)
+    evidence_question = any(
+        term in question_key
+        for term in (
+            "exceedance",
+            "exceedances",
+            "contaminant",
+            "contaminants",
+            "concern",
+        )
+    )
+    if not evidence_question:
+        return None, []
+
+    summary = _context_exceedance_summary(ctx)
+    exceedances = _context_exceedances(ctx)
+    if not summary and not exceedances:
+        return None, []
+
+    used_fields = []
+    if ctx.projectEvidenceSummary:
+        used_fields.append("projectEvidenceSummary")
+    if ctx.projectState and ctx.projectState.exceedanceSummary:
+        used_fields.append("exceedanceSummary")
+    if exceedances:
+        used_fields.append("exceedances")
+
+    project_name = None
+    if ctx.projectState and ctx.projectState.project:
+        project_name = (
+            ctx.projectState.project.projectName or ctx.projectState.project.siteName
+        )
+
+    total = summary.get("totalExceedances")
+    contaminants = _contaminants_from_context(ctx)
+    criteria = _criteria_from_context(ctx)
+    top_text = _top_exceedance_text(ctx)
+
+    if "concern" in question_key or "contaminant" in question_key:
+        subject = f" on {project_name}" if project_name else ""
+        contaminant_text = (
+            ", ".join(contaminants) if contaminants else "the analytes with exceedances"
+        )
+        first = f"The contaminants of concern{subject} are {contaminant_text}."
+    else:
+        first = (
+            "Yes, this project has exceedances."
+            if total
+            else "The project evidence contains exceedance records."
+        )
+
+    details = []
+    if total is not None:
+        details.append(f"{total} total exceedances")
+    if contaminants:
+        details.append(f"affected analytes: {', '.join(contaminants)}")
+    if criteria:
+        details.append(f"criteria: {', '.join(criteria)}")
+
+    sentences = [first]
+    if details:
+        sentences.append("Project evidence shows " + "; ".join(details) + ".")
+    if top_text:
+        sentences.append(f"Top locations are {top_text}.")
+    if "concern" in question_key or "contaminant" in question_key:
+        sentences.append(
+            "Practical next step: focus review and delineation on those analytes and locations before broadening to lower-priority detections."
+        )
+
+    return " ".join(sentences), used_fields
 
 
 def _build_site_context_block(
@@ -657,7 +926,9 @@ def _build_site_context_block(
     if analyte and criterion_value:
         used_project_fields.append("criteria.criteriaDetails.thresholds")
         criterion_text = f" under {criterion_name}" if criterion_name else ""
-        lines.append(f"Applied project criterion: {analyte} = {criterion_value}{criterion_text}.")
+        lines.append(
+            f"Applied project criterion: {analyte} = {criterion_value}{criterion_text}."
+        )
 
     exceedances = filtered.get("exceedances", [])
     if exceedances:
@@ -700,18 +971,24 @@ def _build_site_context_block(
             lines.append(f"Relevant results: {'; '.join(rendered_samples)}.")
 
     if not lines and project_state:
-        lines.append("Project context was supplied, but no question-specific project values were available.")
+        lines.append(
+            "Project context was supplied, but no question-specific project values were available."
+        )
 
     return "\n".join(lines), used_project_fields
 
 
-def _criterion_family_from_question(question: str, selected_criterion: str | None = None) -> str | None:
+def _criterion_family_from_question(
+    question: str, selected_criterion: str | None = None
+) -> str | None:
     normalised = _normalise_text(question)
     for family in ("hsl", "hil", "esl", "eil"):
         if family in normalised:
             return family.upper()
     if selected_criterion:
-        match = re.search(r"\b(HSL|HIL|ESL|EIL)\b", selected_criterion, flags=re.IGNORECASE)
+        match = re.search(
+            r"\b(HSL|HIL|ESL|EIL)\b", selected_criterion, flags=re.IGNORECASE
+        )
         if match:
             return match.group(1).upper()
     return None
@@ -735,15 +1012,18 @@ def _query_aliases_for_analyte(analyte: str | None) -> list[str]:
     if not analyte:
         return []
     aliases = ANALYTE_QUERY_ALIASES.get(_normalise_text(analyte), ())
-    return [alias for alias in aliases if _normalise_text(alias) != _normalise_text(analyte)]
+    return [
+        alias for alias in aliases if _normalise_text(alias) != _normalise_text(analyte)
+    ]
 
 
 def _build_kb_query(question: str, ctx: WorkspaceContext, filtered: dict) -> str:
     question_key = _normalise_text(question)
     selected = filtered.get("selectedCriteria", {})
-    selected_criterion = selected.get("applicableCriteria") or (
-        selected.get("criteriaNames") or [None]
-    )[0]
+    selected_criterion = (
+        selected.get("applicableCriteria")
+        or (selected.get("criteriaNames") or [None])[0]
+    )
     regulations = selected.get("regulations") or []
     regulation_text = ", ".join(regulations) if regulations else None
     analyte = _explicit_question_analyte(question, ctx)
@@ -770,7 +1050,12 @@ def _build_kb_query(question: str, ctx: WorkspaceContext, filtered: dict) -> str
         else:
             leading_terms = [
                 term
-                for term in (regulation_text, family, "criteria values", f"for {analyte}")
+                for term in (
+                    regulation_text,
+                    family,
+                    "criteria values",
+                    f"for {analyte}",
+                )
                 if term
             ]
         parts = [" ".join(leading_terms)]
@@ -780,7 +1065,9 @@ def _build_kb_query(question: str, ctx: WorkspaceContext, filtered: dict) -> str
         if selected_criterion:
             parts.append(f"selected criterion: {selected_criterion}")
         scope_markers = []
-        if _question_requests_document_scope(question) or question_requests_non_selected_scope(question, ctx):
+        if _question_requests_document_scope(
+            question
+        ) or question_requests_non_selected_scope(question, ctx):
             scope_markers.extend(_document_scope_markers(question))
             scope_markers.extend(_extract_requested_scope_markers(question))
         if scope_markers:
@@ -793,11 +1080,17 @@ def _build_kb_query(question: str, ctx: WorkspaceContext, filtered: dict) -> str
         parts = [" ".join(leading_terms) if leading_terms else question]
         if selected_criterion:
             parts.append(f"selected criterion: {selected_criterion}")
-        if _question_requests_document_scope(question) or question_requests_non_selected_scope(question, ctx):
-            scope_markers = _document_scope_markers(question) + _extract_requested_scope_markers(question)
+        if _question_requests_document_scope(
+            question
+        ) or question_requests_non_selected_scope(question, ctx):
+            scope_markers = _document_scope_markers(
+                question
+            ) + _extract_requested_scope_markers(question)
             if scope_markers:
                 parts.append(f"requested scope: {', '.join(scope_markers)}")
-        parts.append("include relevant guidance, table values, and units where applicable")
+        parts.append(
+            "include relevant guidance, table values, and units where applicable"
+        )
         return "; ".join(parts)
 
     return question
@@ -821,11 +1114,15 @@ def _build_context_bot_handoff(
     route: str,
     route_reason: str | None,
 ) -> ContextBotHandoff:
-    relay_block, used_project_fields = _build_relay_block(question, ctx, filtered, route)
+    relay_block, used_project_fields = _build_relay_block(
+        question, ctx, filtered, route
+    )
     return ContextBotHandoff(
         route=route,
         relay_block=relay_block,
-        kb_query=_build_kb_query(question, ctx, filtered) if route == "hybrid" else question,
+        kb_query=_build_kb_query(question, ctx, filtered)
+        if route == "hybrid"
+        else question,
         reason=route_reason or "unspecified",
         used_project_fields=used_project_fields,
     )
@@ -924,7 +1221,9 @@ def _selected_criterion_names(ctx: WorkspaceContext) -> list[str]:
 def _collect_context_analytes(ctx: WorkspaceContext) -> list[str]:
     analytes: list[str] = []
     if ctx.retrievalContext and ctx.retrievalContext.matchedAnalytes:
-        analytes.extend(analyte for analyte in ctx.retrievalContext.matchedAnalytes if analyte)
+        analytes.extend(
+            analyte for analyte in ctx.retrievalContext.matchedAnalytes if analyte
+        )
 
     project_state = ctx.projectState
     if project_state and project_state.criteriaDetails:
@@ -942,16 +1241,12 @@ def _collect_context_analytes(ctx: WorkspaceContext) -> list[str]:
         for row in project_state.projectResults:
             if not row.analyteValues:
                 continue
-            analytes.extend(
-                item.analyte for item in row.analyteValues if item.analyte
-            )
+            analytes.extend(item.analyte for item in row.analyteValues if item.analyte)
     if ctx.retrievalContext and ctx.retrievalContext.retrievedRows:
         for row in ctx.retrievalContext.retrievedRows:
             if not row.analyteValues:
                 continue
-            analytes.extend(
-                item.analyte for item in row.analyteValues if item.analyte
-            )
+            analytes.extend(item.analyte for item in row.analyteValues if item.analyte)
 
     seen: set[str] = set()
     deduped: list[str] = []
@@ -972,10 +1267,14 @@ def _collect_sample_codes(ctx: WorkspaceContext) -> list[str]:
     if project_state and project_state.exceedances:
         codes.extend(ex.sampleCode for ex in project_state.exceedances if ex.sampleCode)
     if project_state and project_state.projectResults:
-        codes.extend(row.sampleCode for row in project_state.projectResults if row.sampleCode)
+        codes.extend(
+            row.sampleCode for row in project_state.projectResults if row.sampleCode
+        )
     if ctx.retrievalContext and ctx.retrievalContext.retrievedRows:
         codes.extend(
-            row.sampleCode for row in ctx.retrievalContext.retrievedRows if row.sampleCode
+            row.sampleCode
+            for row in ctx.retrievalContext.retrievedRows
+            if row.sampleCode
         )
 
     seen: set[str] = set()
@@ -1079,18 +1378,29 @@ def _is_interpretive_question(question: str, ctx: WorkspaceContext) -> bool:
         return True
     if re.search(r"\bwhat (?:is|are).+\bfrom\b", question_key):
         return True
-    if "what does this indicate" in question_key or "what does this mean" in question_key:
+    if (
+        "what does this indicate" in question_key
+        or "what does this mean" in question_key
+    ):
         return True
     if (
         _question_mentions_project_context(question, ctx)
-        and any(term in question_key for term in ("contamination", "exceedance", "criterion", "criteria"))
-        and any(term in question_key for term in ("from", "mean", "means", "indicate", "indicates"))
+        and any(
+            term in question_key
+            for term in ("contamination", "exceedance", "criterion", "criteria")
+        )
+        and any(
+            term in question_key
+            for term in ("from", "mean", "means", "indicate", "indicates")
+        )
     ):
         return True
     return False
 
 
-def _is_deterministic_project_fact_question(question: str, ctx: WorkspaceContext) -> bool:
+def _is_deterministic_project_fact_question(
+    question: str, ctx: WorkspaceContext
+) -> bool:
     question_key = _normalise_text(question)
     if _is_interpretive_question(question, ctx):
         return False
@@ -1101,12 +1411,20 @@ def _is_deterministic_project_fact_question(question: str, ctx: WorkspaceContext
     if any(pattern in question_key for pattern in PROJECT_FACT_PATTERNS):
         return True
     if _question_mentions_any(question, _collect_sample_codes(ctx)) and any(
-        token in question_key for token in ("highest", "lowest", "value", "values", "exceed", "exceedance")
+        token in question_key
+        for token in ("highest", "lowest", "value", "values", "exceed", "exceedance")
     ):
         return True
     if _question_mentions_any(question, _collect_context_analytes(ctx)) and any(
         token in question_key
-        for token in ("highest", "lowest", "main exceedances", "criterion", "threshold", "value in this project")
+        for token in (
+            "highest",
+            "lowest",
+            "main exceedances",
+            "criterion",
+            "threshold",
+            "value in this project",
+        )
     ):
         return True
     return False
@@ -1119,7 +1437,9 @@ def _is_generic_kb_question(question: str, ctx: WorkspaceContext) -> bool:
     return any(pattern in question_key for pattern in GENERIC_KB_PATTERNS)
 
 
-def _deterministic_route_guardrails(question: str, ctx: WorkspaceContext) -> RouteGuardrails:
+def _deterministic_route_guardrails(
+    question: str, ctx: WorkspaceContext
+) -> RouteGuardrails:
     question_key = _normalise_text(question)
     needs_project_grounding = _question_needs_project_grounding(question, ctx)
 
@@ -1138,9 +1458,9 @@ def _deterministic_route_guardrails(question: str, ctx: WorkspaceContext) -> Rou
             reason="interpretive_or_causal_question",
         )
 
-    if (
-        needs_project_grounding
-        and any(term in question_key for term in ("nepm", "guideline", "guidelines", "under", "according to"))
+    if needs_project_grounding and any(
+        term in question_key
+        for term in ("nepm", "guideline", "guidelines", "under", "according to")
     ):
         return RouteGuardrails(
             route_hint="blended",
@@ -1158,11 +1478,15 @@ def _deterministic_route_guardrails(question: str, ctx: WorkspaceContext) -> Rou
     return RouteGuardrails()
 
 
-def _coerce_route(route: str | None, guardrails: RouteGuardrails, context_used: bool) -> str:
+def _coerce_route(
+    route: str | None, guardrails: RouteGuardrails, context_used: bool
+) -> str:
     if not context_used:
         return "kb_only"
 
-    normalised_route = route if route in {"project_only", "kb_only", "blended"} else "blended"
+    normalised_route = (
+        route if route in {"project_only", "kb_only", "blended"} else "blended"
+    )
 
     if guardrails.route_hint:
         return guardrails.route_hint
@@ -1181,20 +1505,40 @@ def _canonical_filtered_context(ctx: WorkspaceContext) -> dict:
     if project_state and project_state.project:
         snapshot["project"] = project_state.project.model_dump(exclude_none=True)
     if project_state and project_state.selectedCriteria:
-        snapshot["selectedCriteria"] = project_state.selectedCriteria.model_dump(exclude_none=True)
+        snapshot["selectedCriteria"] = project_state.selectedCriteria.model_dump(
+            exclude_none=True
+        )
+    if ctx.questionIntent:
+        snapshot["questionIntent"] = ctx.questionIntent
+    if ctx.requiresProjectContext is not None:
+        snapshot["requiresProjectContext"] = ctx.requiresProjectContext
+    if ctx.targetAnalytes:
+        snapshot["targetAnalytes"] = ctx.targetAnalytes
+    if ctx.targetSampleCodes:
+        snapshot["targetSampleCodes"] = ctx.targetSampleCodes
+    if ctx.preferredAnswerShape:
+        snapshot["preferredAnswerShape"] = ctx.preferredAnswerShape
+    if ctx.projectEvidenceSummary:
+        snapshot["projectEvidenceSummary"] = ctx.projectEvidenceSummary.model_dump(
+            exclude_none=True
+        )
     if retrieval_context:
         snapshot["retrievalContext"] = retrieval_context.model_dump(exclude_none=True)
     if project_state and project_state.criteriaDetails:
         snapshot["criteria"] = {
             "criteriaDetails": [
-                detail.model_dump(exclude_none=True) for detail in project_state.criteriaDetails
+                detail.model_dump(exclude_none=True)
+                for detail in project_state.criteriaDetails
             ]
         }
     if project_state and project_state.exceedanceSummary:
-        snapshot["exceedanceSummary"] = project_state.exceedanceSummary.model_dump(exclude_none=True)
+        snapshot["exceedanceSummary"] = project_state.exceedanceSummary.model_dump(
+            exclude_none=True
+        )
     if project_state and project_state.exceedances:
         snapshot["exceedances"] = [
-            exceedance.model_dump(exclude_none=True) for exceedance in project_state.exceedances
+            exceedance.model_dump(exclude_none=True)
+            for exceedance in project_state.exceedances
         ]
 
     relevant_rows = []
@@ -1204,7 +1548,8 @@ def _canonical_filtered_context(ctx: WorkspaceContext) -> dict:
         ]
     elif project_state and project_state.projectResults:
         relevant_rows = [
-            row.model_dump(exclude_none=True) for row in project_state.projectResults[:10]
+            row.model_dump(exclude_none=True)
+            for row in project_state.projectResults[:10]
         ]
     if relevant_rows:
         snapshot["relevantSamples"] = relevant_rows
@@ -1228,7 +1573,9 @@ def _full_project_only_context(ctx: WorkspaceContext) -> dict:
             snapshot["allTestedAnalytes"] = all_tested_analytes
 
     if project_state and project_state.fieldSummary:
-        snapshot["fieldSummary"] = project_state.fieldSummary.model_dump(exclude_none=True)
+        snapshot["fieldSummary"] = project_state.fieldSummary.model_dump(
+            exclude_none=True
+        )
 
     return snapshot
 
@@ -1239,7 +1586,13 @@ def _merge_filtered_with_context(filtered: dict, ctx: WorkspaceContext) -> dict:
     for key, value in filtered.items():
         if value in (None, "", [], {}):
             continue
-        if key in {"project", "selectedCriteria", "criteria", "exceedanceSummary", "retrievalContext"}:
+        if key in {
+            "project",
+            "selectedCriteria",
+            "criteria",
+            "exceedanceSummary",
+            "retrievalContext",
+        }:
             base = merged.get(key, {})
             if isinstance(base, dict) and isinstance(value, dict):
                 merged[key] = {**base, **value}
@@ -1279,10 +1632,14 @@ def _find_matching_threshold(question: str, ctx: WorkspaceContext, analyte: str)
     return None
 
 
-def _try_answer_direct_criterion_lookup(question: str, ctx: WorkspaceContext) -> str | None:
+def _try_answer_direct_criterion_lookup(
+    question: str, ctx: WorkspaceContext
+) -> str | None:
     if not _question_targets_criterion_lookup(question):
         return None
-    if _question_requests_document_scope(question) and not _question_requests_applied_scope(question):
+    if _question_requests_document_scope(
+        question
+    ) and not _question_requests_applied_scope(question):
         return None
     if question_requests_non_selected_scope(question, ctx):
         return None
@@ -1302,7 +1659,10 @@ def _try_answer_direct_criterion_lookup(question: str, ctx: WorkspaceContext) ->
         return None
 
     detail, threshold = matched
-    criterion_name = detail.name or (_selected_criterion_names(ctx)[:1] or ["the selected criterion"])[0]
+    criterion_name = (
+        detail.name
+        or (_selected_criterion_names(ctx)[:1] or ["the selected criterion"])[0]
+    )
     criterion_value_text = _format_value(threshold.value, threshold.unit)
     return f"The applied {analyte} criterion for {criterion_name} is {criterion_value_text}."
 
@@ -1341,7 +1701,9 @@ def _citation_locator(
     chunk_id: str | None,
     content: str | None = None,
 ) -> str:
-    combined = " ".join(part for part in (file_path, chunk_id, reference_id, content) if part)
+    combined = " ".join(
+        part for part in (file_path, chunk_id, reference_id, content) if part
+    )
     table_locator = _extract_table_locator(content, chunk_id)
     page_match = re.search(r"(?:page|p)[\s._-]?(\d{1,4})", combined, re.IGNORECASE)
     if table_locator and page_match:
@@ -1421,7 +1783,7 @@ async def _fetch_rag_citations(query: str, mode: str) -> list[dict]:
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query(req: QueryRequest):
+async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
     if not rag:
         raise HTTPException(status_code=503, detail="RAG not initialized")
 
@@ -1490,23 +1852,35 @@ async def query(req: QueryRequest):
             debug.used_project_fields = handoff.used_project_fields
 
             if route_used == "project_only" and result is None:
-                direct_context_answer = _try_answer_direct_criterion_lookup(
-                    effective_question, req.context
+                direct_context_answer, direct_context_fields = (
+                    _try_answer_project_evidence(
+                        effective_question,
+                        req.context,
+                        handoff.reason,
+                    )
                 )
                 if direct_context_answer:
                     result = direct_context_answer
+                    debug.used_project_fields = direct_context_fields
                 else:
-                    answer_prompt = (
-                        f"User question: {effective_question}\n\n"
-                        f"Relevant project context JSON:\n"
-                        f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
+                    direct_context_answer = _try_answer_direct_criterion_lookup(
+                        effective_question,
+                        req.context,
                     )
-                    result = await openai_complete_if_cache(
-                        LLM_MODEL,
-                        answer_prompt,
-                        system_prompt=PROJECT_ONLY_ANSWER_SYSTEM,
-                        api_key=os.getenv("OPENAI_API_KEY"),
-                    )
+                    if direct_context_answer:
+                        result = direct_context_answer
+                    else:
+                        answer_prompt = (
+                            f"User question: {effective_question}\n\n"
+                            f"Relevant project context JSON:\n"
+                            f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
+                        )
+                        result = await openai_complete_if_cache(
+                            LLM_MODEL,
+                            answer_prompt,
+                            system_prompt=PROJECT_ONLY_ANSWER_SYSTEM,
+                            api_key=os.getenv("OPENAI_API_KEY"),
+                        )
                 sections.site_context = result
             else:
                 rag_query = handoff.kb_query
@@ -1521,7 +1895,9 @@ async def query(req: QueryRequest):
                 user_prompt=ALFIE_USER_PROMPT,
             )
             if context_used and route_used == "hybrid":
-                result = _assemble_isolated_answer(route_used, handoff.relay_block, kb_answer)
+                result = _assemble_isolated_answer(
+                    route_used, handoff.relay_block, kb_answer
+                )
                 sections.site_context = handoff.relay_block.strip() or None
                 sections.regulatory_context = kb_answer.strip()
             else:
@@ -1566,21 +1942,21 @@ async def query(req: QueryRequest):
 
 
 @app.post("/session/new")
-async def new_session():
+async def new_session(_auth: None = Depends(require_rag_auth)):
     session_id = str(uuid.uuid4())
     sessions[session_id] = {"history": [], "last_used": time.time()}
     return {"session_id": session_id}
 
 
 @app.get("/session/{session_id}/history")
-async def get_history(session_id: str):
+async def get_history(session_id: str, _auth: None = Depends(require_rag_auth)):
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"session_id": session_id, "history": sessions[session_id]["history"]}
 
 
 @app.delete("/session/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, _auth: None = Depends(require_rag_auth)):
     if session_id in sessions:
         del sessions[session_id]
     return {"status": "deleted"}

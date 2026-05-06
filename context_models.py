@@ -178,6 +178,18 @@ class ProjectState(BaseModel):
     fieldSummary: Optional[FieldSummary] = None
 
 
+class ProjectEvidenceSummary(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    summary: Optional[str] = None
+    totalExceedances: Optional[int] = None
+    affectedSamples: Optional[List[str]] = None
+    affectedAnalytes: Optional[List[str]] = None
+    exceededCriteria: Optional[List[str]] = None
+    contaminantsOfConcern: Optional[List[str]] = None
+    topExceedances: Optional[List[Exceedance]] = None
+
+
 class RetrievalContext(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -199,6 +211,12 @@ class WorkspaceContext(BaseModel):
 
     schemaVersion: Optional[int] = None
     generatedAtIso: Optional[str] = None
+    questionIntent: Optional[str] = None
+    requiresProjectContext: Optional[bool] = None
+    targetAnalytes: Optional[List[str]] = None
+    targetSampleCodes: Optional[List[str]] = None
+    preferredAnswerShape: Optional[str] = None
+    projectEvidenceSummary: Optional[ProjectEvidenceSummary] = None
     projectState: Optional[ProjectState] = None
     retrievalContext: Optional[RetrievalContext] = None
     conversation: Optional[List[ConversationMessage]] = Field(
@@ -269,6 +287,49 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
 
     project_state = ctx.projectState
     retrieval_context = ctx.retrievalContext
+
+    v4_parts = []
+    if ctx.questionIntent:
+        v4_parts.append(f"Question intent: {ctx.questionIntent}")
+    if ctx.requiresProjectContext is not None:
+        v4_parts.append(
+            f"Requires project context: {'Yes' if ctx.requiresProjectContext else 'No'}"
+        )
+    if ctx.targetAnalytes:
+        v4_parts.append(f"Target analytes: {', '.join(ctx.targetAnalytes)}")
+    if ctx.targetSampleCodes:
+        v4_parts.append(f"Target samples: {', '.join(ctx.targetSampleCodes)}")
+    if ctx.preferredAnswerShape:
+        v4_parts.append(f"Preferred answer shape: {ctx.preferredAnswerShape}")
+    if v4_parts:
+        sections.append("## Request Context\n" + "\n".join(v4_parts))
+
+    if ctx.projectEvidenceSummary:
+        evidence = ctx.projectEvidenceSummary
+        parts = []
+        if evidence.summary:
+            parts.append(evidence.summary)
+        if evidence.totalExceedances is not None:
+            parts.append(f"Total exceedances: {evidence.totalExceedances}")
+        if evidence.affectedAnalytes:
+            parts.append(f"Affected analytes: {', '.join(evidence.affectedAnalytes)}")
+        if evidence.exceededCriteria:
+            parts.append(f"Exceeded criteria: {', '.join(evidence.exceededCriteria)}")
+        if evidence.topExceedances:
+            rendered = []
+            for exceedance in evidence.topExceedances:
+                if exceedance.analyte and exceedance.value is not None:
+                    row = f"{exceedance.analyte}"
+                    if exceedance.sampleCode:
+                        row += f" @ {exceedance.sampleCode}"
+                    row += f": {exceedance.value}"
+                    if exceedance.unit:
+                        row += f" {exceedance.unit}"
+                    rendered.append(row)
+            if rendered:
+                parts.append("Top exceedances: " + "; ".join(rendered))
+        if parts:
+            sections.append("## Project Evidence Summary\n" + "\n".join(parts))
 
     if project_state and project_state.project:
         p = project_state.project

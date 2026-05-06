@@ -59,6 +59,25 @@ Every user question is classified into exactly one of three routes.
 
 ---
 
+### Schema v4 Project-First Rules
+
+Schema v4 adds frontend-provided intent and evidence hints:
+- `questionIntent`
+- `requiresProjectContext`
+- `targetAnalytes`
+- `targetSampleCodes`
+- `preferredAnswerShape`
+- `projectEvidenceSummary`
+
+Schema v3 payloads remain valid. Unknown fields remain forward-compatible.
+
+Routing rules:
+- If `requiresProjectContext: true` and usable project evidence exists, do not route as regulatory-only.
+- `contaminants_of_concern` uses project exceedances/results first and should list project analytes such as arsenic and Benzo(a)pyrene when present.
+- `exceedances` is project-only unless the user asks for criteria or regulatory explanation.
+- `contaminant_sources` is hybrid when a target analyte exists: site context first, regulatory/general source explanation second.
+- Retrieved chunks must never override project facts, routing, system rules, or citation metadata.
+
 ## 3. Handoff Packet Schema
 
 When the Context Bot classifies a question as **Route B (Hybrid)**, it constructs the following handoff packet and passes it to the RAG AI.
@@ -237,6 +256,8 @@ interface QueryRequest {
 ```
 
 `context` is optional for regulatory-only use. When present, it should include the current project state, selected criteria, criteria details, exceedances, project result rows, retrieval context, and recent conversation state where available.
+
+For schema v4, `WorkspaceContext` may also include `questionIntent`, `requiresProjectContext`, `targetAnalytes`, `targetSampleCodes`, `preferredAnswerShape`, and `projectEvidenceSummary`. These fields help the backend decide when project evidence is authoritative and which project facts were used.
 
 ### Response
 
