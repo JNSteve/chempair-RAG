@@ -10,6 +10,7 @@ from query_normalization import normalise_text
 
 INTERPRETIVE_ROUTE_PATTERNS = (
     r"\bsource\b",
+    r"\bsources\b",
     r"\borigin\b",
     r"\blikely from\b",
     r"\bcaused by\b",
@@ -32,6 +33,9 @@ INTERPRETIVE_ROUTE_PATTERNS = (
 PROJECT_FACT_PATTERNS = (
     "main exceedances",
     "what are the exceedances",
+    "any exceedances",
+    "do i have exceedances",
+    "do i have any exceedances",
     "which sample had the highest",
     "which sample has the highest",
     "highest ",
@@ -42,6 +46,15 @@ PROJECT_FACT_PATTERNS = (
     "criterion have i selected",
     "how many exceedances",
     "total exceedances",
+)
+CONTAMINANTS_OF_CONCERN_TERMS = (
+    "contaminants of concern",
+    "contaminant of concern",
+    "contaminants should i be concerned",
+    "contaminants should i be concerned about",
+    "what contaminants",
+    "which contaminants",
+    "contaminants are concerning",
 )
 GENERIC_KB_PATTERNS = (
     "tell me about",
@@ -84,6 +97,9 @@ PROJECT_ONLY_SCOPE_TERMS = (
     "our project",
     "my site",
     "my project",
+    "this job",
+    "my job",
+    "on this job",
     "selected criteria",
     "selected criterion",
     "criteria have i selected",
@@ -176,13 +192,17 @@ def _has_regulatory_framing(question_key: str) -> bool:
         any(pattern in question_key for pattern in DOCUMENT_SCOPE_PATTERNS)
         or any(pattern in question_key for pattern in GENERIC_KB_PATTERNS)
         or any(term in question_key for term in PROJECT_CRITERIA_TERMS)
-        or any(term in question_key for term in ("nepm", "guideline", "guidelines", "table", "document"))
+        or any(
+            term in question_key
+            for term in ("nepm", "guideline", "guidelines", "table", "document")
+        )
     )
 
 
 def _mentions_regulation_or_criteria(question_key: str) -> bool:
     return _has_regulatory_framing(question_key) or any(
-        term in question_key for term in ("criterion", "criteria", "threshold", "regulation", "regulations")
+        term in question_key
+        for term in ("criterion", "criteria", "threshold", "regulation", "regulations")
     )
 
 
@@ -191,7 +211,17 @@ def _is_follow_up_fragment(question_key: str) -> bool:
     if token_count <= 4:
         return True
     return question_key.startswith(
-        ("in the", "across", "for all", "all ", "under", "compare", "what about", "and ", "or ")
+        (
+            "in the",
+            "across",
+            "for all",
+            "all ",
+            "under",
+            "compare",
+            "what about",
+            "and ",
+            "or ",
+        )
     )
 
 
@@ -206,6 +236,35 @@ def has_regulatory_context(ctx: WorkspaceContext) -> bool:
             or selected.applicableCriteria
             or selected.state
             or selected.landUse
+        )
+    )
+
+
+def has_usable_project_evidence(ctx: WorkspaceContext) -> bool:
+    if ctx.projectEvidenceSummary:
+        evidence = ctx.projectEvidenceSummary
+        if (
+            evidence.summary
+            or evidence.totalExceedances is not None
+            or evidence.affectedAnalytes
+            or evidence.contaminantsOfConcern
+            or evidence.topExceedances
+        ):
+            return True
+
+    project_state = ctx.projectState
+    if not project_state:
+        return False
+    return bool(
+        project_state.exceedances
+        or project_state.projectResults
+        or (
+            project_state.exceedanceSummary
+            and (
+                project_state.exceedanceSummary.totalExceedances is not None
+                or project_state.exceedanceSummary.affectedAnalytes
+                or project_state.exceedanceSummary.affectedSamples
+            )
         )
     )
 
@@ -233,7 +292,9 @@ def question_requests_non_selected_scope(question: str, ctx: WorkspaceContext) -
     if qualifier_mismatch:
         return True
 
-    depth_mentions = re.findall(r"\b\d+\s*(?:-\s*\d+)?\s*m\b|\b<\s*\d+\s*m\b", question_key)
+    depth_mentions = re.findall(
+        r"\b\d+\s*(?:-\s*\d+)?\s*m\b|\b<\s*\d+\s*m\b", question_key
+    )
     if depth_mentions and not any(depth in selected_key for depth in depth_mentions):
         return True
 
@@ -241,7 +302,9 @@ def question_requests_non_selected_scope(question: str, ctx: WorkspaceContext) -
 
 
 def question_needs_project_grounding(grounded: GroundedQuestion) -> bool:
-    if any(term in grounded.normalised_question for term in PROJECT_INTERPRETIVE_REFERENTS):
+    if any(
+        term in grounded.normalised_question for term in PROJECT_INTERPRETIVE_REFERENTS
+    ):
         return True
     return grounded.has_entity_matches
 
@@ -273,15 +336,49 @@ def is_interpretive_question(grounded: GroundedQuestion) -> bool:
         return True
     if re.search(r"\bwhat (?:is|are).+\bfrom\b", question_key):
         return True
-    if "what does this indicate" in question_key or "what does this mean" in question_key:
+    if (
+        "what does this indicate" in question_key
+        or "what does this mean" in question_key
+    ):
         return True
     if (
         grounded.has_entity_matches
-        and any(term in question_key for term in ("contamination", "exceedance", "criterion", "criteria"))
-        and any(term in question_key for term in ("from", "mean", "means", "indicate", "indicates"))
+        and any(
+            term in question_key
+            for term in ("contamination", "exceedance", "criterion", "criteria")
+        )
+        and any(
+            term in question_key
+            for term in ("from", "mean", "means", "indicate", "indicates")
+        )
     ):
         return True
     return False
+
+
+def is_contaminants_of_concern_question(question_key: str) -> bool:
+    return any(term in question_key for term in CONTAMINANTS_OF_CONCERN_TERMS) or (
+        "concern" in question_key
+        and any(
+            term in question_key
+            for term in ("contaminant", "contaminants", "analyte", "analytes")
+        )
+    )
+
+
+def is_contaminant_sources_question(grounded: GroundedQuestion) -> bool:
+    question_key = grounded.normalised_question
+    return bool(grounded.matched_analytes) and any(
+        term in question_key
+        for term in (
+            "source",
+            "sources",
+            "come from",
+            "comes from",
+            "origin",
+            "origins",
+        )
+    )
 
 
 def is_deterministic_project_fact_question(grounded: GroundedQuestion) -> bool:
@@ -295,12 +392,20 @@ def is_deterministic_project_fact_question(grounded: GroundedQuestion) -> bool:
     if _mentions_regulation_or_criteria(question_key):
         return False
     if grounded.matched_sample_codes and any(
-        token in question_key for token in ("highest", "lowest", "value", "values", "exceed", "exceedance")
+        token in question_key
+        for token in ("highest", "lowest", "value", "values", "exceed", "exceedance")
     ):
         return True
     if grounded.matched_analytes and any(
         token in question_key
-        for token in ("highest", "lowest", "main exceedances", "criterion", "threshold", "value in this project")
+        for token in (
+            "highest",
+            "lowest",
+            "main exceedances",
+            "criterion",
+            "threshold",
+            "value in this project",
+        )
     ):
         return True
     return False
@@ -309,7 +414,9 @@ def is_deterministic_project_fact_question(grounded: GroundedQuestion) -> bool:
 def is_generic_kb_question(grounded: GroundedQuestion) -> bool:
     if grounded.has_entity_matches:
         return False
-    return any(pattern in grounded.normalised_question for pattern in GENERIC_KB_PATTERNS)
+    return any(
+        pattern in grounded.normalised_question for pattern in GENERIC_KB_PATTERNS
+    )
 
 
 def deterministic_route_guardrails(
@@ -324,12 +431,42 @@ def deterministic_route_guardrails(
     mentions_regulation_or_criteria = _mentions_regulation_or_criteria(question_key)
     explicit_regulatory_override = _has_explicit_regulatory_override(question_key)
     explicit_project_scope = _has_explicit_project_scope(question_key)
+    usable_project_evidence = has_usable_project_evidence(ctx)
 
-    if explicit_regulatory_override:
+    if explicit_regulatory_override and not (
+        ctx.requiresProjectContext and usable_project_evidence
+    ):
         return RouteGuardrails(
             route_hint="regulatory_only",
             project_only_allowed=False,
             reason="explicit_regulatory_override",
+        )
+
+    if is_contaminants_of_concern_question(question_key) and usable_project_evidence:
+        return RouteGuardrails(
+            route_hint="project_only",
+            project_only_allowed=True,
+            reason="contaminants_of_concern_project_evidence",
+        )
+
+    if is_contaminant_sources_question(grounded) and usable_project_evidence:
+        return RouteGuardrails(
+            route_hint="hybrid",
+            project_only_allowed=False,
+            reason="contaminant_sources_project_anchored",
+        )
+
+    if ctx.requiresProjectContext and usable_project_evidence:
+        if has_regulatory_framing or is_interpretive_question(grounded):
+            return RouteGuardrails(
+                route_hint="hybrid",
+                project_only_allowed=False,
+                reason="requires_project_context_with_regulatory_support",
+            )
+        return RouteGuardrails(
+            route_hint="project_only",
+            project_only_allowed=True,
+            reason="requires_project_context_with_project_evidence",
         )
 
     if previous_route and _is_follow_up_fragment(question_key):
@@ -339,13 +476,21 @@ def deterministic_route_guardrails(
                 project_only_allowed=False,
                 reason="follow_up_inherits_regulatory_only",
             )
-        if previous_route == "project_only" and not has_regulatory_framing and not explicit_regulatory_override:
+        if (
+            previous_route == "project_only"
+            and not has_regulatory_framing
+            and not explicit_regulatory_override
+        ):
             return RouteGuardrails(
                 route_hint="project_only",
                 project_only_allowed=True,
                 reason="follow_up_inherits_project_only",
             )
-        if previous_route == "hybrid" and not explicit_regulatory_override and not explicit_project_scope:
+        if (
+            previous_route == "hybrid"
+            and not explicit_regulatory_override
+            and not explicit_project_scope
+        ):
             return RouteGuardrails(
                 route_hint="hybrid",
                 project_only_allowed=False,
@@ -361,7 +506,9 @@ def deterministic_route_guardrails(
 
     if mentions_regulation_or_criteria:
         return RouteGuardrails(
-            route_hint="hybrid" if (grounded.has_entity_matches or explicit_project_scope) else "regulatory_only",
+            route_hint="hybrid"
+            if (grounded.has_entity_matches or explicit_project_scope)
+            else "regulatory_only",
             project_only_allowed=False,
             reason="regulation_or_criteria_question",
         )
@@ -434,7 +581,9 @@ def deterministic_route_guardrails(
     )
 
 
-def coerce_route(route: str | None, guardrails: RouteGuardrails, context_used: bool) -> str:
+def coerce_route(
+    route: str | None, guardrails: RouteGuardrails, context_used: bool
+) -> str:
     if not context_used:
         return "regulatory_only"
 
