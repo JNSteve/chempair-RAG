@@ -693,6 +693,10 @@ def _join_sentence_parts(parts: list[str]) -> str:
 def _context_exceedance_summary(ctx: WorkspaceContext) -> dict:
     if ctx.projectEvidenceSummary:
         evidence = ctx.projectEvidenceSummary.model_dump(exclude_none=True)
+        nested_summary = evidence.get("exceedanceSummary")
+        if isinstance(nested_summary, dict):
+            for key, value in nested_summary.items():
+                evidence.setdefault(key, value)
         if evidence:
             return evidence
 
@@ -707,6 +711,14 @@ def _context_exceedances(ctx: WorkspaceContext) -> list[dict]:
         return [
             exceedance.model_dump(exclude_none=True)
             for exceedance in ctx.projectEvidenceSummary.topExceedances
+        ]
+    if (
+        ctx.projectEvidenceSummary
+        and ctx.projectEvidenceSummary.topExceedancesByMagnitude
+    ):
+        return [
+            exceedance.model_dump(exclude_none=True)
+            for exceedance in ctx.projectEvidenceSummary.topExceedancesByMagnitude
         ]
 
     project_state = ctx.projectState
