@@ -181,6 +181,9 @@ class ProjectState(BaseModel):
 class ProjectEvidenceSummary(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    project: Optional[ProjectInfo] = None
+    selectedCriteria: Optional[SelectedCriteria] = None
+    exceedanceSummary: Optional[ExceedanceSummary] = None
     summary: Optional[str] = None
     totalExceedances: Optional[int] = None
     affectedSamples: Optional[List[str]] = None
@@ -188,6 +191,10 @@ class ProjectEvidenceSummary(BaseModel):
     exceededCriteria: Optional[List[str]] = None
     contaminantsOfConcern: Optional[List[str]] = None
     topExceedances: Optional[List[Exceedance]] = None
+    topExceedancesByMagnitude: Optional[List[Exceedance]] = None
+    matchedAnalytes: Optional[List[str]] = None
+    matchedSampleLocations: Optional[List[str]] = None
+    relevantResultRows: Optional[List[ProjectResultRow]] = None
 
 
 class RetrievalContext(BaseModel):
@@ -309,15 +316,31 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
         parts = []
         if evidence.summary:
             parts.append(evidence.summary)
-        if evidence.totalExceedances is not None:
-            parts.append(f"Total exceedances: {evidence.totalExceedances}")
-        if evidence.affectedAnalytes:
-            parts.append(f"Affected analytes: {', '.join(evidence.affectedAnalytes)}")
-        if evidence.exceededCriteria:
-            parts.append(f"Exceeded criteria: {', '.join(evidence.exceededCriteria)}")
-        if evidence.topExceedances:
+        total_exceedances = evidence.totalExceedances
+        affected_analytes = evidence.affectedAnalytes
+        exceeded_criteria = evidence.exceededCriteria
+        if evidence.exceedanceSummary:
+            total_exceedances = (
+                total_exceedances
+                if total_exceedances is not None
+                else evidence.exceedanceSummary.totalExceedances
+            )
+            affected_analytes = (
+                affected_analytes or evidence.exceedanceSummary.affectedAnalytes
+            )
+            exceeded_criteria = (
+                exceeded_criteria or evidence.exceedanceSummary.exceededCriteria
+            )
+        if total_exceedances is not None:
+            parts.append(f"Total exceedances: {total_exceedances}")
+        if affected_analytes:
+            parts.append(f"Affected analytes: {', '.join(affected_analytes)}")
+        if exceeded_criteria:
+            parts.append(f"Exceeded criteria: {', '.join(exceeded_criteria)}")
+        top_exceedances = evidence.topExceedances or evidence.topExceedancesByMagnitude
+        if top_exceedances:
             rendered = []
-            for exceedance in evidence.topExceedances:
+            for exceedance in top_exceedances:
                 if exceedance.analyte and exceedance.value is not None:
                     row = f"{exceedance.analyte}"
                     if exceedance.sampleCode:
