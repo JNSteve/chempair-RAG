@@ -1,0 +1,20 @@
+# Chempair RAG corpus manifest — the registry of every document in the
+# knowledge base. Filing conventions: corpus/README.md. Managed via
+# scripts/corpus_manifest.py (add / validate / list); avoid hand-editing
+# hashes.
+#
+# Document fields:
+#   doc_id         unique kebab-case id, e.g. nepm-2013-schedule-b1
+#   title          full document title
+#   family         guideline family: NEPM | ANZECC | ASC | NSW | VIC | QLD | OTHER
+#   jurisdiction   AU | NSW | VIC | QLD | ...
+#   version        publication version/year, e.g. "2013"
+#   status         current | superseded
+#   superseded_by  doc_id of the replacement (required when superseded)
+#   filename       PDF filename inside the corpus folder (my_pdfs/)
+#   sha256         file hash, computed by `corpus_manifest.py add`
+#   source_url     where the document was obtained (optional)
+#   ingested_at    ISO timestamp of last ingestion (set by the Phase 2 pipeline)
+
+schema_version: 1
+documents: []

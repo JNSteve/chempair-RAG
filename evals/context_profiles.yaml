@@ -1,0 +1,128 @@
+# Reusable workspace-context fixtures for the golden eval harness.
+# Shapes mirror the enviro-sage schema v4 payload (see frontend-rag-handoff.md).
+# `ducat_soil` is the Package 4 QA project. Questions using profile `none`
+# are sent without a context field (no project loaded).
+#
+# Per-question overrides in golden_questions.yaml (question_intent,
+# preferred_answer_shape, target_analytes) are applied on top of the profile
+# by the runner.
+
+profiles:
+  ducat_soil:
+    schemaVersion: 4
+    generatedAtIso: "2026-05-12T10:00:00.000Z"
+    questionIntent: contaminants_of_concern
+    requiresProjectContext: true
+    targetAnalytes: []
+    targetSampleCodes: []
+    preferredAnswerShape: project_contaminants_summary
+    projectEvidenceSummary:
+      project: &ducat_project
+        projectName: Ducat
+        projectId: ducat-001
+        siteName: Ducat
+        projectType: soil
+        totalSamples: 32
+        totalAnalytes: 18
+      selectedCriteria: &ducat_criteria
+        applicableCriteria: NEPM 2013 HIL-A residential
+        regulations:
+          - NEPM 2013
+        landUse: Residential
+        state: QLD
+        criteriaNames:
+          - NEPM 2013 HIL-A residential
+        criteriaCount: 1
+      exceedanceSummary: &ducat_exceedance_summary
+        totalExceedances: 22
+        affectedSamples: [BH20, TP01, BH23, TP07]
+        affectedAnalytes: [Arsenic, Benzo(a)pyrene]
+        exceededCriteria:
+          - NEPM 2013 HIL-A residential
+        hotspotCount: 3
+      topExceedancesByMagnitude: &ducat_top_exceedances
+        - analyte: Arsenic
+          sampleCode: BH20
+          criterion: NEPM 2013 HIL-A residential
+          value: 870
+          criterionValue: 100
+          exceedanceFactor: 8.7
+          isHotspot: true
+          unit: mg/kg
+        - analyte: Arsenic
+          sampleCode: TP01
+          criterion: NEPM 2013 HIL-A residential
+          value: 680
+          criterionValue: 100
+          exceedanceFactor: 6.8
+          isHotspot: true
+          unit: mg/kg
+        - analyte: Arsenic
+          sampleCode: BH23
+          criterion: NEPM 2013 HIL-A residential
+          value: 520
+          criterionValue: 100
+          exceedanceFactor: 5.2
+          isHotspot: true
+          unit: mg/kg
+        - analyte: Benzo(a)pyrene
+          sampleCode: TP07
+          criterion: NEPM 2013 HIL-A residential
+          value: 6.4
+          criterionValue: 3
+          exceedanceFactor: 2.13
+          isHotspot: false
+          unit: mg/kg
+      matchedAnalytes: []
+      matchedSampleLocations: [BH20, TP01, BH23, TP07]
+      relevantResultRows: &ducat_rows
+        - sampleCode: BH20
+          depth: 0-0.5m
+          analyteValues:
+            - analyte: Arsenic
+              value: 870
+              unit: mg/kg
+        - sampleCode: TP01
+          depth: 0-0.5m
+          analyteValues:
+            - analyte: Arsenic
+              value: 680
+              unit: mg/kg
+    projectState:
+      project: *ducat_project
+      selectedCriteria: *ducat_criteria
+      criteriaDetails:
+        - name: NEPM 2013 HIL-A residential
+          thresholds:
+            - analyte: Arsenic
+              value: 100
+              unit: mg/kg
+            - analyte: Benzo(a)pyrene
+              value: 3
+              unit: mg/kg
+      exceedanceSummary: *ducat_exceedance_summary
+      exceedances: *ducat_top_exceedances
+      projectResults:
+        - sampleCode: BH20
+          depth: 0-0.5m
+          analyteValues:
+            - analyte: Arsenic
+              value: 870
+              unit: mg/kg
+        - sampleCode: TP01
+          depth: 0-0.5m
+          analyteValues:
+            - analyte: Arsenic
+              value: 680
+              unit: mg/kg
+        - sampleCode: BH23
+          depth: 0-0.5m
+          analyteValues:
+            - analyte: Arsenic
+              value: 520
+              unit: mg/kg
+    retrievalContext:
+      matchedAnalytes: []
+      matchedSampleCodes: []
+      questionTokens: []
+      retrievedRows: []
