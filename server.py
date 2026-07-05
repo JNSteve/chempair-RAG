@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sentence_transformers import SentenceTransformer
 
+from citation_extraction import extract_citations_from_rag_payload
 from context_models import WorkspaceContext, MAX_CONTEXT_PAYLOAD_BYTES
 from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
@@ -335,8 +336,6 @@ GENERIC_REGULATION_TOKENS = {
     "vapour",
     "wa",
 }
-MAX_CITATIONS = 4
-MAX_SNIPPET_LENGTH = 220
 DOCUMENT_SCOPE_PATTERNS = (
     "all soil types",
     "all land uses",
@@ -1679,109 +1678,6 @@ def _try_answer_direct_criterion_lookup(
     return f"The applied {analyte} criterion for {criterion_name} is {criterion_value_text}."
 
 
-def _file_source_name(file_path: str | None, reference_id: str | None) -> str:
-    if file_path:
-        cleaned = str(file_path).replace("\\", "/").rstrip("/")
-        if cleaned:
-            source = cleaned.split("/")[-1]
-            return source.removeprefix("tables_")
-    if reference_id:
-        return f"reference-{reference_id}"
-    return "reference"
-
-
-def _citation_title(source: str) -> str:
-    stem = re.sub(r"\.[A-Za-z0-9]+$", "", source).replace("_", " ").strip()
-    return stem or source
-
-
-def _extract_table_locator(text: str | None, chunk_id: str | None = None) -> str | None:
-    combined = " ".join(part for part in (text, chunk_id) if part)
-    table_match = re.search(
-        r"\bTable\s+([A-Za-z]?\d+[A-Za-z]?(?:\([^)]+\))*)",
-        combined,
-        re.IGNORECASE,
-    )
-    if not table_match:
-        return None
-    return f"Table {table_match.group(1)}"
-
-
-def _citation_locator(
-    reference_id: str | None,
-    file_path: str | None,
-    chunk_id: str | None,
-    content: str | None = None,
-) -> str:
-    combined = " ".join(
-        part for part in (file_path, chunk_id, reference_id, content) if part
-    )
-    table_locator = _extract_table_locator(content, chunk_id)
-    page_match = re.search(r"(?:page|p)[\s._-]?(\d{1,4})", combined, re.IGNORECASE)
-    if table_locator and page_match:
-        return f"{table_locator}, p. {page_match.group(1)}"
-    if table_locator:
-        return table_locator
-    if page_match:
-        return f"p. {page_match.group(1)}"
-    if chunk_id:
-        return chunk_id
-    if reference_id:
-        return f"ref {reference_id}"
-    return "source passage"
-
-
-def _bounded_snippet(text: str | None) -> str:
-    snippet = re.sub(r"\s+", " ", (text or "")).strip()
-    if len(snippet) <= MAX_SNIPPET_LENGTH:
-        return snippet
-    return snippet[: MAX_SNIPPET_LENGTH - 3].rstrip() + "..."
-
-
-def _extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
-    if not isinstance(payload, dict):
-        return []
-
-    data = payload.get("data", {})
-    references = data.get("references", []) if isinstance(data, dict) else []
-    chunks = data.get("chunks", []) if isinstance(data, dict) else []
-
-    chunks_by_reference: dict[str, list[dict]] = {}
-    for chunk in chunks:
-        reference_id = chunk.get("reference_id")
-        if reference_id:
-            chunks_by_reference.setdefault(reference_id, []).append(chunk)
-
-    citations: list[dict] = []
-    for reference in references:
-        reference_id = reference.get("reference_id")
-        file_path = reference.get("file_path")
-        ref_chunks = chunks_by_reference.get(reference_id, [])
-        primary_chunk = ref_chunks[0] if ref_chunks else {}
-        snippet = _bounded_snippet(primary_chunk.get("content"))
-        if not snippet:
-            continue
-
-        source = _file_source_name(file_path, reference_id)
-        citations.append(
-            {
-                "source": source,
-                "title": _citation_title(source),
-                "locator": _citation_locator(
-                    reference_id,
-                    file_path,
-                    primary_chunk.get("chunk_id"),
-                    primary_chunk.get("content"),
-                ),
-                "snippet": snippet,
-            }
-        )
-        if len(citations) >= MAX_CITATIONS:
-            break
-
-    return citations
-
-
 async def _fetch_rag_citations(query: str, mode: str) -> list[dict]:
     lightrag = getattr(rag, "lightrag", None)
     if lightrag is None or not hasattr(lightrag, "aquery_data"):
@@ -1791,7 +1687,7 @@ async def _fetch_rag_citations(query: str, mode: str) -> list[dict]:
         query,
         param=QueryParam(mode=mode),
     )
-    return _extract_citations_from_rag_payload(data)
+    return extract_citations_from_rag_payload(data)
 
 
 @app.post("/query", response_model=QueryResponse)

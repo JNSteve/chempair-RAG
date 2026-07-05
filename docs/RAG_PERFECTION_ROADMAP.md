@@ -89,7 +89,7 @@ covered by tests.
 | 0 — Eval harness | PRD_001 / PRP_001 | Built — baseline run pending (needs live corpus) |
 | 1 — Corpus manifest | PRD_001 / PRP_001 | Built — corpus registration pending |
 | 2 — Ingestion pipeline | PRD_002 / PRP_002 | Built — first real run pending |
-| 3 — Retrieval upgrade | — | Not started |
-| 4 — Exact citations | — | Not started |
-| 5 — Answer quality | — | Not started |
-| 6 — Ops | — | Not started |
+| 3 — Retrieval upgrade | — | Not started (needs Phase 0 baseline) |
+| 4 — Exact citations | PRD_003 / PRP_003 | Built — exact locators live once corpus is re-ingested |
+| 5 — Answer quality | — | Started: repo-wide ruff debt cleared |
+| 6 — Ops | — | Started: CI workflow added |
