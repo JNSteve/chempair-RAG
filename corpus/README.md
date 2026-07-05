@@ -35,3 +35,20 @@ python scripts/corpus_manifest.py list                          # inventory
 python scripts/corpus_manifest.py validate                      # schema-only
 python scripts/corpus_manifest.py validate --corpus-dir my_pdfs # + files/hashes
 ```
+
+## Ingestion
+
+The knowledge base is built from the manifest by `ingest_corpus.py`
+(requires `OPENAI_API_KEY`):
+
+```bash
+python ingest_corpus.py --dry-run           # show what would happen
+python ingest_corpus.py                     # ingest new/changed documents
+python ingest_corpus.py --replace <doc_id>  # force one document
+python ingest_corpus.py --rebuild           # force everything
+```
+
+Runs are idempotent: a document is only re-ingested when its file hash
+differs from the manifest's `ingested_sha256` (or when forced). Superseded
+and unregistered documents are never ingested. Every run writes a JSON
+report under `reports/ingest/`.

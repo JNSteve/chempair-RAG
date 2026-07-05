@@ -14,7 +14,9 @@
 #   filename       PDF filename inside the corpus folder (my_pdfs/)
 #   sha256         file hash, computed by `corpus_manifest.py add`
 #   source_url     where the document was obtained (optional)
-#   ingested_at    ISO timestamp of last ingestion (set by the Phase 2 pipeline)
+#   ingested_at    ISO timestamp of last ingestion (set by ingest_corpus.py)
+#   ingested_sha256  hash the KB currently holds for this doc (set by
+#                    ingest_corpus.py; drift vs sha256 triggers re-ingestion)
 
 schema_version: 1
 documents: []

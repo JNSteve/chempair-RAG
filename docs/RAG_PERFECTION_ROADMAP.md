@@ -86,9 +86,9 @@ covered by tests.
 
 | Phase | PRD/PRP | Status |
 |-------|---------|--------|
-| 0 — Eval harness | PRD_001 / PRP_001 | In progress |
-| 1 — Corpus manifest | PRD_001 / PRP_001 | In progress |
-| 2 — Ingestion pipeline | — | Not started |
+| 0 — Eval harness | PRD_001 / PRP_001 | Built — baseline run pending (needs live corpus) |
+| 1 — Corpus manifest | PRD_001 / PRP_001 | Built — corpus registration pending |
+| 2 — Ingestion pipeline | PRD_002 / PRP_002 | Built — first real run pending |
 | 3 — Retrieval upgrade | — | Not started |
 | 4 — Exact citations | — | Not started |
 | 5 — Answer quality | — | Not started |

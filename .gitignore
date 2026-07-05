@@ -6,3 +6,4 @@ pytest-cache-files-*/
 my_pdfs/
 parsed_output/
 rag_storage/
+reports/
