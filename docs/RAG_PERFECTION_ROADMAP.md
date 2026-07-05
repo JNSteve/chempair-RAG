@@ -86,7 +86,7 @@ covered by tests.
 
 | Phase | PRD/PRP | Status |
 |-------|---------|--------|
-| 0 — Eval harness | PRD_001 / PRP_001 | Built — baseline run pending (needs live corpus) |
+| 0 — Eval harness | PRD_001 / PRP_001 | Built; partial baseline recorded (`evals/baseline/2026-07-05-no-llm-partial/`) — full run needs an OpenAI key |
 | 1 — Corpus manifest | PRD_001 / PRP_001 | Built — corpus registration pending |
 | 2 — Ingestion pipeline | PRD_002 / PRP_002 | Built — first real run pending |
 | 3 — Retrieval upgrade | — | Not started (needs Phase 0 baseline) |
