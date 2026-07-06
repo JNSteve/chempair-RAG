@@ -7,3 +7,4 @@ my_pdfs/
 parsed_output/
 rag_storage/
 reports/
+dist/
