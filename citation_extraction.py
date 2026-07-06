@@ -20,9 +20,37 @@ without the RAG stack.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 MAX_CITATIONS = 4
 MAX_SNIPPET_LENGTH = 220
+
+# Citation titles resolve doc_id -> the manifest's human title ("NEPM
+# (Assessment of Site Contamination) 2013 compilation — Volume 2 of 22")
+# instead of the raw filename stem ("F2013C00288VOL02"). Improving a title
+# is a one-line manifest edit — no re-ingest needed.
+MANIFEST_PATH = Path(__file__).resolve().parent / "corpus" / "manifest.yaml"
+_manifest_titles: dict[str, str] | None = None
+
+
+def _load_manifest_titles() -> dict[str, str]:
+    """doc_id -> title from the corpus manifest; empty (and harmless) when
+    the manifest is absent, empty, or unreadable."""
+    global _manifest_titles
+    if _manifest_titles is None:
+        titles: dict[str, str] = {}
+        try:
+            import yaml
+
+            manifest = yaml.safe_load(MANIFEST_PATH.read_text(encoding="utf-8")) or {}
+            for doc in manifest.get("documents") or []:
+                if isinstance(doc, dict) and doc.get("doc_id") and doc.get("title"):
+                    titles[str(doc["doc_id"])] = str(doc["title"])
+        except Exception:
+            pass
+        _manifest_titles = titles
+    return _manifest_titles
+
 
 SOURCE_MARKER_PATTERN = re.compile(
     r"^\[source:\s*(?P<filename>[^|\]]+?)\s*"
@@ -148,6 +176,9 @@ def extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
         if marker:
             source = marker["filename"]
             locator = _marker_locator(marker)
+            title = _load_manifest_titles().get(marker["doc_id"]) or _citation_title(
+                source
+            )
         else:
             source = _file_source_name(file_path, reference_id)
             locator = _citation_locator(
@@ -156,6 +187,7 @@ def extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
                 primary_chunk.get("chunk_id"),
                 content,
             )
+            title = _citation_title(source)
 
         location = (source, locator)
         if location in seen_locations:
@@ -165,7 +197,7 @@ def extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
         citations.append(
             {
                 "source": source,
-                "title": _citation_title(source),
+                "title": title,
                 "locator": locator,
                 "snippet": snippet,
             }
