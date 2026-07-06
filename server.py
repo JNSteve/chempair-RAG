@@ -47,7 +47,10 @@ load_dotenv()
 
 # ---- Configuration ----
 RAG_STORAGE = os.environ.get("RAG_STORAGE", "./rag_storage")
-LLM_MODEL = "gpt-5.4-mini"
+# Query-time answer model. Override per deployment (e.g. RAG_LLM_MODEL=gpt-5.4
+# on Railway) to trade cost for answer quality — no code change needed.
+# Ingestion keeps its own cheaper model (ingest_corpus.py).
+LLM_MODEL = os.environ.get("RAG_LLM_MODEL", "gpt-5.4-mini")
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 SESSION_TTL = 3600
