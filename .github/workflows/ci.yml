@@ -37,6 +37,7 @@ jobs:
           tests/test_retrieval_eval.py
           tests/test_kb_info.py
           tests/test_session_store.py
+          tests/test_dockerfile_completeness.py
           -q
 
   test-full:
