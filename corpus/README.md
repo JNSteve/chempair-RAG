@@ -31,6 +31,7 @@ the manifest is the versioned source of truth for what the KB contains.
 ## Commands
 
 ```bash
+python scripts/corpus_manifest.py seed --corpus-dir my_pdfs    # one-command bulk registration (corpus/seed_metadata.yaml)
 python scripts/corpus_manifest.py list                          # inventory
 python scripts/corpus_manifest.py validate                      # schema-only
 python scripts/corpus_manifest.py validate --corpus-dir my_pdfs # + files/hashes

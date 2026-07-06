@@ -157,3 +157,58 @@ def _add_args(manifest_file, pdf):
         version="2013",
         source_url=None,
     )
+
+
+def test_cmd_seed_bulk_registers_and_is_idempotent(manifest_file, tmp_path, capsys):
+    import argparse
+
+    (tmp_path / "NEPM_2013_Schedule_B1.pdf").write_bytes(b"pdf-one")
+    metadata = tmp_path / "seed_metadata.yaml"
+    metadata.write_text(
+        """
+documents:
+  - filename: NEPM_2013_Schedule_B1.pdf
+    doc_id: nepm-2013-schedule-b1
+    title: NEPM 2013 Schedule B1
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+  - filename: Missing_Doc.pdf
+    doc_id: missing-doc
+    title: Missing Document
+    family: OTHER
+    jurisdiction: AU
+    version: unknown
+""",
+        encoding="utf-8",
+    )
+    args = argparse.Namespace(
+        manifest=manifest_file, metadata=metadata, corpus_dir=str(tmp_path)
+    )
+
+    # First run: one added, one missing -> exit 1 flags the gap
+    assert corpus_manifest.cmd_seed(args) == 1
+    manifest = yaml.safe_load(manifest_file.read_text(encoding="utf-8"))
+    (entry,) = manifest["documents"]
+    assert entry["doc_id"] == "nepm-2013-schedule-b1"
+    assert entry["sha256"] == corpus_manifest.sha256_of(
+        tmp_path / "NEPM_2013_Schedule_B1.pdf"
+    )
+
+    # Second run: already registered -> skipped, still flags the missing file
+    assert corpus_manifest.cmd_seed(args) == 1
+    manifest = yaml.safe_load(manifest_file.read_text(encoding="utf-8"))
+    assert len(manifest["documents"]) == 1
+
+
+def test_repo_seed_metadata_is_well_formed():
+    metadata_path = ROOT / "corpus" / "seed_metadata.yaml"
+    entries = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))["documents"]
+    assert len(entries) == 30
+    ids = [e["doc_id"] for e in entries]
+    filenames = [e["filename"] for e in entries]
+    assert len(set(ids)) == 30 and len(set(filenames)) == 30
+    for entry in entries:
+        assert corpus_manifest.DOC_ID_PATTERN.match(entry["doc_id"])
+        assert entry["family"] in corpus_manifest.VALID_FAMILIES
+        assert entry["title"] and entry["jurisdiction"]

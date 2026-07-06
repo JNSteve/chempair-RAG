@@ -198,6 +198,69 @@ def cmd_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_seed(args: argparse.Namespace) -> int:
+    """Bulk-register PDFs from a pre-classified metadata file (skips
+    already-registered documents and reports missing files)."""
+    manifest = load_manifest(args.manifest)
+    documents = manifest.setdefault("documents", []) or []
+    manifest["documents"] = documents
+
+    with open(args.metadata, encoding="utf-8") as handle:
+        entries = (yaml.safe_load(handle) or {}).get("documents") or []
+    corpus_dir = Path(args.corpus_dir)
+    if not corpus_dir.is_dir():
+        print(f"error: corpus dir not found: {corpus_dir}", file=sys.stderr)
+        return 1
+
+    existing_ids = {doc.get("doc_id") for doc in documents}
+    existing_files = {doc.get("filename") for doc in documents}
+    added, skipped, missing = 0, 0, 0
+
+    for entry in entries:
+        filename = entry["filename"]
+        doc_id = entry["doc_id"]
+        if doc_id in existing_ids or filename in existing_files:
+            skipped += 1
+            continue
+        pdf_path = corpus_dir / filename
+        if not pdf_path.is_file():
+            print(f"missing: {filename} (not in {corpus_dir})", file=sys.stderr)
+            missing += 1
+            continue
+        documents.append(
+            {
+                "doc_id": doc_id,
+                "title": entry["title"],
+                "family": entry["family"],
+                "jurisdiction": entry["jurisdiction"],
+                "version": str(entry.get("version", "unknown")),
+                "status": "current",
+                "superseded_by": None,
+                "filename": filename,
+                "sha256": sha256_of(pdf_path),
+                "source_url": entry.get("source_url"),
+                "ingested_at": None,
+            }
+        )
+        existing_ids.add(doc_id)
+        existing_files.add(filename)
+        added += 1
+        print(f"registered {doc_id} ({filename})")
+
+    problems = validate_documents(manifest, corpus_dir=None)
+    if problems:
+        for problem in problems:
+            print(f"error: {problem}", file=sys.stderr)
+        return 1
+
+    if added:
+        save_manifest(args.manifest, manifest)
+    print(
+        f"\nseed complete: {added} added, {skipped} already registered, {missing} missing"
+    )
+    return 0 if missing == 0 else 1
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.manifest)
     corpus_dir = Path(args.corpus_dir) if args.corpus_dir else None
@@ -246,6 +309,20 @@ def main() -> int:
     add.add_argument("--version", required=True, help="publication version/year")
     add.add_argument("--source-url", help="where the document was obtained")
     add.set_defaults(func=cmd_add)
+
+    seed = subparsers.add_parser(
+        "seed", help="bulk-register PDFs from a pre-classified metadata file"
+    )
+    seed.add_argument(
+        "--metadata",
+        type=Path,
+        default=DEFAULT_MANIFEST.parent / "seed_metadata.yaml",
+        help="metadata file (default: corpus/seed_metadata.yaml)",
+    )
+    seed.add_argument(
+        "--corpus-dir", default="my_pdfs", help="folder containing the PDFs"
+    )
+    seed.set_defaults(func=cmd_seed)
 
     validate = subparsers.add_parser("validate", help="validate the manifest")
     validate.add_argument(
