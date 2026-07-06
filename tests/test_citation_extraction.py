@@ -211,3 +211,47 @@ def test_duplicate_source_locator_citations_are_deduped():
     assert len(citations) == 2
     assert citations[0]["locator"] == "Table 1A(1), p. 14"
     assert citations[1]["locator"] == "Table 1A(1), p. 99"
+
+
+def test_marker_citation_title_resolves_from_manifest(tmp_path, monkeypatch):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        """
+documents:
+  - doc_id: nepm-asc-2013-vol02
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation - Volume 2 of 22"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ce, "MANIFEST_PATH", manifest)
+    monkeypatch.setattr(ce, "_manifest_titles", None)
+
+    payload = _payload(
+        [
+            _marker_chunk(
+                filename="F2013C00288VOL02.pdf",
+                doc_id="nepm-asc-2013-vol02",
+                page=31,
+                table="Table 1A(1)",
+            )
+        ],
+        [{"reference_id": "ref-1", "file_path": "/kb/F2013C00288VOL02.pdf"}],
+    )
+    (citation,) = ce.extract_citations_from_rag_payload(payload)
+    assert citation["title"] == (
+        "NEPM (Assessment of Site Contamination) 2013 compilation - Volume 2 of 22"
+    )
+    assert citation["source"] == "F2013C00288VOL02.pdf"
+    assert citation["locator"] == "Table 1A(1), p. 31"
+
+
+def test_marker_citation_title_falls_back_without_manifest(tmp_path, monkeypatch):
+    monkeypatch.setattr(ce, "MANIFEST_PATH", tmp_path / "missing.yaml")
+    monkeypatch.setattr(ce, "_manifest_titles", None)
+
+    payload = _payload(
+        [_marker_chunk(filename="F2013C00288VOL02.pdf", doc_id="nepm-asc-2013-vol02")],
+        [{"reference_id": "ref-1", "file_path": "/kb/F2013C00288VOL02.pdf"}],
+    )
+    (citation,) = ce.extract_citations_from_rag_payload(payload)
+    assert citation["title"] == "F2013C00288VOL02"
