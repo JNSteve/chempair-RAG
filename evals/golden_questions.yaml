@@ -8,7 +8,7 @@
 #   id                 unique snake_case id
 #   category           project_evidence | threshold_lookup | criteria_explanation
 #                      | source_pathway | jurisdiction | follow_up | injection
-#                      | guardrail | table_lookup
+#                      | guardrail | table_lookup | practice_guidance
 #   question           text sent to /query (typos intentional where present —
 #                      they mirror real Package 4 golden inputs)
 #   profile            key in context_profiles.yaml, or none for no context
@@ -354,3 +354,77 @@ questions:
       min_citations: 1
       citation_source_pattern: "(?i)nepm"
       exact_locator: true
+
+  # --- practice_guidance: CLM consulting guidance (July 2026 corpus
+  # expansion). severity info until the documents are ingested; flip to
+  # blocking once the post-expansion KB ships. ---
+  - id: duty_to_report_trigger
+    category: practice_guidance
+    question: "when do I have a duty to report contamination to the EPA in NSW?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)150164|duty"
+      must_include: ["notif"]
+
+  - id: site_auditor_expectations
+    category: practice_guidance
+    question: "what does a NSW site auditor expect to see in a contaminated land report?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)17p0269|auditor"
+
+  - id: ground_gas_assessment
+    category: practice_guidance
+    question: "how should hazardous ground gases be assessed at a contaminated site?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)19p2047|ground.?gas"
+
+  - id: upss_service_station_investigation
+    category: practice_guidance
+    question: "what is required when investigating contamination at a service station with underground petroleum storage?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)20p2700|23p4441|petroleum|service"
+
+  - id: hsl_derivation
+    category: practice_guidance
+    question: "how are the petroleum hydrocarbon health screening levels derived?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)crc.?care|tech.?report.?10"
+
+  - id: vic_contaminated_land_policy
+    category: practice_guidance
+    question: "what is EPA Victoria's policy approach to contaminated land?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)1915|contaminated-land-policy"
+
+  - id: emp_contents
+    category: practice_guidance
+    question: "what should an environmental management plan for contaminated land include?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)20p2675|22p3473|environmental-management"

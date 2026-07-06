@@ -22,6 +22,7 @@ VALID_CATEGORIES = {
     "injection",
     "guardrail",
     "table_lookup",
+    "practice_guidance",
 }
 VALID_EXPECT_FIELDS = {
     "route_used",
