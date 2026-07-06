@@ -220,3 +220,102 @@ documents:
     family: NEPM
     jurisdiction: AU
     version: "2013"
+
+  # --- CLM practice-guidance expansion (July 2026) ---
+  # Registered automatically by `seed` once the PDFs land in my_pdfs/;
+  # entries for files not yet downloaded are reported and skipped.
+
+  - filename: 150164-report-land-contamination-guidelines.pdf
+    doc_id: nsw-2015-duty-to-report
+    title: "NSW EPA Guidelines on the Duty to Report Contamination under the Contaminated Land Management Act 1997"
+    family: NSW
+    jurisdiction: NSW
+    version: "2015"
+    source_url: https://www.epa.nsw.gov.au/sites/default/files/150164-report-land-contamination-guidelines.pdf
+
+  - filename: 17p0269-guidelines-for-the-nsw-site-auditor-scheme-third-edition.pdf
+    doc_id: nsw-2017-site-auditor-scheme
+    title: "Guidelines for the NSW Site Auditor Scheme (3rd edition)"
+    family: NSW
+    jurisdiction: NSW
+    version: "2017"
+    source_url: https://www.epa.nsw.gov.au/sites/default/files/17p0269-guidelines-for-the-nsw-site-auditor-scheme-third-edition.pdf
+
+  - filename: 19p2047-hazardous-ground-gases-guidelines.pdf
+    doc_id: nsw-2020-hazardous-ground-gases
+    title: "NSW EPA Assessment and Management of Hazardous Ground Gases: Contaminated Land Guidelines"
+    family: NSW
+    jurisdiction: NSW
+    version: "2020"
+    source_url: https://www.epa.nsw.gov.au/sites/default/files/19p2047-hazardous-ground-gases-guidelines.pdf
+
+  - filename: 20p2700-underground-petroleum-storage-systems-guidelines.pdf
+    doc_id: nsw-2020-upss-guidelines
+    title: "NSW EPA Underground Petroleum Storage Systems: Guidelines"
+    family: NSW
+    jurisdiction: NSW
+    version: "2020"
+    source_url: https://www.epa.nsw.gov.au/sites/default/files/20p2700-underground-petroleum-storage-systems-guidelines.pdf
+
+  - filename: 23p4441-service-station-assessment.pdf
+    doc_id: nsw-2023-service-station-assessment
+    title: "NSW EPA Contamination Assessment of Service Station Sites"
+    family: NSW
+    jurisdiction: NSW
+    version: "2023"
+    source_url: https://www.epa.nsw.gov.au/sites/default/files/23p4441-service-station-assessment.pdf
+
+  - filename: 20p2675-preparing-environmental-management-plans-for-contaminated-land.pdf
+    doc_id: nsw-2020-emp-preparation
+    title: "NSW EPA Preparing Environmental Management Plans for Contaminated Land"
+    family: NSW
+    jurisdiction: NSW
+    version: "2020"
+
+  - filename: 22p3473-emps-for-contaminated-land-practice-note.pdf
+    doc_id: nsw-2022-emp-practice-note
+    title: "NSW EPA Environmental Management Plans for Contaminated Land: Practice Note"
+    family: NSW
+    jurisdiction: NSW
+    version: "2022"
+    source_url: https://www.epa.nsw.gov.au/sites/default/files/22p3473-emps-for-contaminated-land-practice-note.pdf
+
+  - filename: managing-contaminated-land-guidelines-remediation.pdf
+    doc_id: nsw-1998-planning-guidelines-sepp55
+    title: "Managing Land Contamination: Planning Guidelines SEPP 55 - Remediation of Land"
+    family: NSW
+    jurisdiction: NSW
+    version: "1998"
+    source_url: https://www.epa.nsw.gov.au/sites/default/files/managing-contaminated-land-guidelines-remediation.pdf
+
+  - filename: 140798-acid-sulfate-soils.pdf
+    doc_id: nsw-2014-waste-classification-part4
+    title: "NSW EPA Waste Classification Guidelines Part 4: Acid Sulfate Soils"
+    family: NSW
+    jurisdiction: NSW
+    version: "2014"
+    source_url: https://www.epa.nsw.gov.au/sites/default/files/140798-acid-sulfate-soils.pdf
+
+  - filename: anzecc-armcanz-2000-guidelines-vol1.pdf
+    doc_id: anzecc-2000-water-quality-vol1
+    title: "ANZECC & ARMCANZ Australian and New Zealand Guidelines for Fresh and Marine Water Quality, Volume 1 (2000)"
+    family: ANZECC
+    jurisdiction: AU
+    version: "2000"
+    source_url: https://www.waterquality.gov.au/sites/default/files/documents/anzecc-armcanz-2000-guidelines-vol1.pdf
+
+  - filename: CRC-CARE-Tech-Report-10-Part-1-Technical-development-document.pdf
+    doc_id: crc-care-tr10-part1-petroleum-hsls
+    title: "CRC CARE Technical Report 10: Health Screening Levels for Petroleum Hydrocarbons in Soil and Groundwater, Part 1"
+    family: OTHER
+    jurisdiction: AU
+    version: "2011"
+    source_url: https://crccare.com/wp-content/uploads/2024/02/CRC-CARE-Tech-Report-10-Part-1-Technical-development-document.pdf
+
+  - filename: 1915-contaminated-land-policy.pdf
+    doc_id: vic-2021-contaminated-land-policy
+    title: "EPA Victoria Publication 1915: Contaminated Land Policy"
+    family: VIC
+    jurisdiction: VIC
+    version: "2021"
+    source_url: https://www.epa.vic.gov.au/sites/default/files/epa/publications/1915-contaminated-land-policy.pdf

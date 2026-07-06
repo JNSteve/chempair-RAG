@@ -204,10 +204,11 @@ documents:
 def test_repo_seed_metadata_is_well_formed():
     metadata_path = ROOT / "corpus" / "seed_metadata.yaml"
     entries = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))["documents"]
-    assert len(entries) == 30
+    # 30 original production-KB docs + the CLM practice-guidance expansion
+    assert len(entries) >= 30
     ids = [e["doc_id"] for e in entries]
     filenames = [e["filename"] for e in entries]
-    assert len(set(ids)) == 30 and len(set(filenames)) == 30
+    assert len(set(ids)) == len(ids) and len(set(filenames)) == len(filenames)
     for entry in entries:
         assert corpus_manifest.DOC_ID_PATTERN.match(entry["doc_id"])
         assert entry["family"] in corpus_manifest.VALID_FAMILIES
