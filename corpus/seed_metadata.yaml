@@ -1,0 +1,222 @@
+# Pre-classified metadata for the 30 source PDFs in the v1.0 production KB
+# (corpus/SEED_LIST.md). Register everything in one command:
+#
+#   python scripts/corpus_manifest.py seed --corpus-dir my_pdfs
+#
+# Files not present in the corpus folder are reported and skipped; re-running
+# is safe (already-registered documents are skipped). Review titles/versions
+# marked "unknown" and correct in corpus/manifest.yaml if needed.
+
+documents:
+  - filename: 140796-classify-waste.pdf
+    doc_id: nsw-2014-waste-classification-part1
+    title: "NSW EPA Waste Classification Guidelines Part 1: Classifying Waste"
+    family: NSW
+    jurisdiction: NSW
+    version: "2014"
+
+  - filename: 20p2233-consultants-reporting-on-contaminated-land-guidelines.pdf
+    doc_id: nsw-2020-consultants-reporting
+    title: "NSW EPA Guidelines for Consultants Reporting on Contaminated Land"
+    family: NSW
+    jurisdiction: NSW
+    version: "2020"
+
+  - filename: 22p3915-sampling-design-guidelines-part1.pdf
+    doc_id: nsw-2022-sampling-design-part1
+    title: "NSW EPA Sampling Design Guidelines Part 1"
+    family: NSW
+    jurisdiction: NSW
+    version: "2022"
+
+  - filename: 22p3916-sampling-design-guidelines-part2.pdf
+    doc_id: nsw-2022-sampling-design-part2
+    title: "NSW EPA Sampling Design Guidelines Part 2"
+    family: NSW
+    jurisdiction: NSW
+    version: "2022"
+
+  - filename: "NEPM_2013 (1).pdf"
+    doc_id: nepm-asc-2013-combined
+    title: "National Environment Protection (Assessment of Site Contamination) Measure 1999 (2013 compilation)"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: pfas-nemp-3.pdf
+    doc_id: pfas-nemp-v3
+    title: "PFAS National Environmental Management Plan, Version 3.0"
+    family: OTHER
+    jurisdiction: AU
+    version: "3.0"
+
+  - filename: QLD_Waste_Framework.pdf
+    doc_id: qld-waste-framework
+    title: "QLD Waste Framework"
+    family: QLD
+    jurisdiction: QLD
+    version: unknown
+
+  - filename: QLD_Waste_Operating_ERA.pdf
+    doc_id: qld-waste-operating-era
+    title: "QLD Waste-Related Environmentally Relevant Activities (ERA) Operating Guidance"
+    family: QLD
+    jurisdiction: QLD
+    version: unknown
+
+  # National Environment Protection (Assessment of Site Contamination)
+  # Measure 1999 — Federal Register compilation F2013C00288, 22 volumes
+  # (the schedules: B1 investigation levels, B2 site characterisation, etc.)
+  - filename: F2013C00288VOL01.pdf
+    doc_id: nepm-asc-2013-vol01
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 1 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL02.pdf
+    doc_id: nepm-asc-2013-vol02
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 2 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL03.pdf
+    doc_id: nepm-asc-2013-vol03
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 3 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL04.pdf
+    doc_id: nepm-asc-2013-vol04
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 4 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL05.pdf
+    doc_id: nepm-asc-2013-vol05
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 5 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL06.pdf
+    doc_id: nepm-asc-2013-vol06
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 6 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL07.pdf
+    doc_id: nepm-asc-2013-vol07
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 7 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL08.pdf
+    doc_id: nepm-asc-2013-vol08
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 8 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL09.pdf
+    doc_id: nepm-asc-2013-vol09
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 9 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL10.pdf
+    doc_id: nepm-asc-2013-vol10
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 10 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL11.pdf
+    doc_id: nepm-asc-2013-vol11
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 11 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL12.pdf
+    doc_id: nepm-asc-2013-vol12
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 12 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL13.pdf
+    doc_id: nepm-asc-2013-vol13
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 13 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL14.pdf
+    doc_id: nepm-asc-2013-vol14
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 14 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL15.pdf
+    doc_id: nepm-asc-2013-vol15
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 15 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL16.pdf
+    doc_id: nepm-asc-2013-vol16
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 16 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL17.pdf
+    doc_id: nepm-asc-2013-vol17
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 17 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL18.pdf
+    doc_id: nepm-asc-2013-vol18
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 18 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL19.pdf
+    doc_id: nepm-asc-2013-vol19
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 19 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL20.pdf
+    doc_id: nepm-asc-2013-vol20
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 20 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL21.pdf
+    doc_id: nepm-asc-2013-vol21
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 21 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"
+
+  - filename: F2013C00288VOL22.pdf
+    doc_id: nepm-asc-2013-vol22
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation — Volume 22 of 22"
+    family: NEPM
+    jurisdiction: AU
+    version: "2013"

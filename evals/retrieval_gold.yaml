@@ -1,0 +1,76 @@
+# Gold retrieval set for the Phase 3 embedding bake-off.
+#
+# Each query is a realistic consultant question; expect_files is a regex that
+# must match the source filename of at least one top-k retrieved chunk for
+# the query to count as a hit. Patterns were authored against the actual
+# v1.0 production KB contents (topic->file mining recorded in PR #30), so
+# every query has known-relevant chunks in the corpus.
+#
+# Run: python evals/retrieval_eval.py --rag-storage <dir>   (see --help)
+
+schema_version: 1
+
+queries:
+  - id: hil_arsenic_residential
+    query: "health investigation level for arsenic in residential soil"
+    expect_files: "(?i)F2013C00288VOL(02|10|19)|NEPM_2013"
+
+  - id: hsl_petroleum_vapour
+    query: "health screening levels for petroleum hydrocarbon vapour intrusion"
+    expect_files: "(?i)F2013C00288VOL02|NEPM_2013"
+
+  - id: eil_soil
+    query: "ecological investigation levels for contaminants in soil"
+    expect_files: "(?i)F2013C00288VOL(02|06|07|08)"
+
+  - id: esl_benzene
+    query: "ecological screening level for benzene in soil"
+    expect_files: "(?i)F2013C00288VOL(02|04)|NEPM_2013"
+
+  - id: nsw_waste_classification
+    query: "how to classify general solid waste versus restricted solid waste"
+    expect_files: "(?i)140796-classify-waste"
+
+  - id: pfas_guideline_values
+    query: "PFAS guideline values for soil and water"
+    expect_files: "(?i)pfas-nemp-3"
+
+  - id: pfos_criteria
+    query: "PFOS criteria for drinking water and recreational water"
+    expect_files: "(?i)pfas-nemp-3"
+
+  - id: csm_contents
+    query: "what should a conceptual site model include"
+    expect_files: "(?i)20p2233|22p3915|F2013C00288VOL03|pfas-nemp-3"
+
+  - id: sampling_design_density
+    query: "how many samples are needed for a site investigation sampling design"
+    expect_files: "(?i)22p391(5|6)|F2013C00288VOL03"
+
+  - id: groundwater_investigation_trigger
+    query: "when is a groundwater investigation required at a contaminated site"
+    expect_files: "(?i)F2013C00288VOL02|NEPM_2013"
+
+  - id: asbestos_in_soil
+    query: "assessment requirements for asbestos in soil"
+    expect_files: "(?i)F2013C00288VOL(02|03)|NEPM_2013|22p3915"
+
+  - id: vapour_intrusion_assessment
+    query: "soil vapour intrusion assessment for volatile contaminants near buildings"
+    expect_files: "(?i)NEPM_2013|F2013C00288VOL(02|03|19)"
+
+  - id: bioavailability_metals
+    query: "bioavailability adjustment for metals in contaminated soil"
+    expect_files: "(?i)F2013C00288VOL(07|08|10|12)"
+
+  - id: qld_era_waste_licence
+    query: "environmentally relevant activity operating licence for waste in Queensland"
+    expect_files: "(?i)QLD_Waste"
+
+  - id: nsw_consultant_reporting
+    query: "reporting requirements for consultants on contaminated land in NSW"
+    expect_files: "(?i)20p2233"
+
+  - id: hil_tables_metals
+    query: "table of health investigation levels for metals"
+    expect_files: "(?i)F2013C00288VOL(02|10|19)|NEPM_2013"
