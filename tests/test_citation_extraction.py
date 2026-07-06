@@ -165,7 +165,8 @@ def test_legacy_chunk_without_signals_falls_back_to_source_passage():
 
 def test_citation_cap_and_empty_snippet_skip():
     chunks = [
-        _marker_chunk(reference_id=f"ref-{i}", body=f"Body text {i}.") for i in range(6)
+        _marker_chunk(reference_id=f"ref-{i}", page=10 + i, body=f"Body text {i}.")
+        for i in range(6)
     ]
     chunks.append(
         {"reference_id": "ref-empty", "file_path": "/kb/x.pdf", "content": "   "}
@@ -193,3 +194,20 @@ def test_snippet_is_bounded():
 def test_non_dict_payload_returns_empty():
     assert ce.extract_citations_from_rag_payload(None) == []
     assert ce.extract_citations_from_rag_payload({"data": "nope"}) == []
+
+
+def test_duplicate_source_locator_citations_are_deduped():
+    chunks = [
+        _marker_chunk(reference_id="ref-1", body="First excerpt from the table."),
+        _marker_chunk(reference_id="ref-2", body="Second excerpt, same table."),
+        _marker_chunk(reference_id="ref-3", page=99, body="Different page."),
+    ]
+    references = [
+        {"reference_id": "ref-1", "file_path": "/kb/a.pdf"},
+        {"reference_id": "ref-2", "file_path": "/kb/a.pdf"},
+        {"reference_id": "ref-3", "file_path": "/kb/a.pdf"},
+    ]
+    citations = ce.extract_citations_from_rag_payload(_payload(chunks, references))
+    assert len(citations) == 2
+    assert citations[0]["locator"] == "Table 1A(1), p. 14"
+    assert citations[1]["locator"] == "Table 1A(1), p. 99"

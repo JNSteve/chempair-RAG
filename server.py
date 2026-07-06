@@ -24,6 +24,8 @@ from sentence_transformers import SentenceTransformer
 from citation_extraction import extract_citations_from_rag_payload
 from context_models import WorkspaceContext, MAX_CONTEXT_PAYLOAD_BYTES
 from kb_info import health_kb_info
+from session_store import load_sessions, persist_sessions
+from upstream_errors import classify_upstream_error
 from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
@@ -417,6 +419,11 @@ def get_or_create_session(session_id: str | None) -> tuple[str, list[dict]]:
     return new_id, sessions[new_id]["history"]
 
 
+def checkpoint_sessions() -> None:
+    """Persist sessions so restarts don't break ongoing conversations."""
+    persist_sessions(RAG_STORAGE, sessions)
+
+
 def cleanup_sessions():
     now = time.time()
     expired = [
@@ -426,6 +433,8 @@ def cleanup_sessions():
     ]
     for session_id in expired:
         del sessions[session_id]
+    if expired:
+        checkpoint_sessions()
 
 
 _embed_model = None
@@ -474,6 +483,8 @@ rag = None
 @app.on_event("startup")
 async def startup():
     global rag
+    for session_id, session in load_sessions(RAG_STORAGE, SESSION_TTL).items():
+        sessions.setdefault(session_id, session)
     config = RAGAnythingConfig(
         working_dir=RAG_STORAGE,
         enable_image_processing=False,
@@ -1833,6 +1844,7 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
         if len(history) >= MAX_EXCHANGES * 2:
             del sessions[session_id]
             session_reset = True
+        checkpoint_sessions()
 
         return QueryResponse(
             answer=result,
@@ -1846,14 +1858,24 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
             sections=sections,
             debug=debug,
         )
+    except HTTPException:
+        raise
     except Exception as error:
-        raise HTTPException(status_code=500, detail=str(error))
+        status_code, message = classify_upstream_error(error)
+        logger.error(
+            "query_failed status=%d session=%s error=%s",
+            status_code,
+            session_id,
+            str(error)[:500],
+        )
+        raise HTTPException(status_code=status_code, detail=message)
 
 
 @app.post("/session/new")
 async def new_session(_auth: None = Depends(require_rag_auth)):
     session_id = str(uuid.uuid4())
     sessions[session_id] = {"history": [], "last_used": time.time()}
+    checkpoint_sessions()
     return {"session_id": session_id}
 
 
@@ -1868,6 +1890,7 @@ async def get_history(session_id: str, _auth: None = Depends(require_rag_auth)):
 async def delete_session(session_id: str, _auth: None = Depends(require_rag_auth)):
     if session_id in sessions:
         del sessions[session_id]
+        checkpoint_sessions()
     return {"status": "deleted"}
 
 

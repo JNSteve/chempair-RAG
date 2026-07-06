@@ -36,6 +36,7 @@ jobs:
           tests/test_citation_extraction.py
           tests/test_retrieval_eval.py
           tests/test_kb_info.py
+          tests/test_session_store.py
           -q
 
   test-full:

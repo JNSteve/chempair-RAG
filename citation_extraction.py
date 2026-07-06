@@ -133,6 +133,7 @@ def extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
             chunks_by_reference.setdefault(reference_id, []).append(chunk)
 
     citations: list[dict] = []
+    seen_locations: set[tuple[str, str]] = set()
     for reference in references:
         reference_id = reference.get("reference_id")
         file_path = reference.get("file_path")
@@ -155,6 +156,11 @@ def extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
                 primary_chunk.get("chunk_id"),
                 content,
             )
+
+        location = (source, locator)
+        if location in seen_locations:
+            continue
+        seen_locations.add(location)
 
         citations.append(
             {
