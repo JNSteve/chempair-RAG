@@ -23,6 +23,7 @@ from sentence_transformers import SentenceTransformer
 
 from citation_extraction import extract_citations_from_rag_payload
 from context_models import WorkspaceContext, MAX_CONTEXT_PAYLOAD_BYTES
+from kb_info import health_kb_info
 from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
@@ -1877,4 +1878,7 @@ async def health():
         "model": LLM_MODEL,
         "storage": RAG_STORAGE,
         "active_sessions": len(sessions),
+        "kb": health_kb_info(
+            Path(__file__).parent / "corpus" / "manifest.yaml", RAG_STORAGE
+        ),
     }

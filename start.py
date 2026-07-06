@@ -4,8 +4,10 @@ import tarfile
 import uvicorn
 
 RAG_STORAGE = os.environ.get("RAG_STORAGE", "/data/rag_storage")
-RELEASE_URL = (
-    "https://github.com/JNSteve/chempair-RAG/releases/download/v1.0/rag_storage.tar.gz"
+# Override with KB_RELEASE_URL to deploy a newer packaged KB (scripts/package_kb.py).
+RELEASE_URL = os.environ.get(
+    "KB_RELEASE_URL",
+    "https://github.com/JNSteve/chempair-RAG/releases/download/v1.0/rag_storage.tar.gz",
 )
 
 
