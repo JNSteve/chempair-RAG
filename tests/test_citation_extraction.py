@@ -255,3 +255,40 @@ def test_marker_citation_title_falls_back_without_manifest(tmp_path, monkeypatch
     )
     (citation,) = ce.extract_citations_from_rag_payload(payload)
     assert citation["title"] == "F2013C00288VOL02"
+
+
+def test_markerless_chunk_resolves_title_from_manifest_by_filename(
+    tmp_path, monkeypatch
+):
+    # A page-continuation chunk (no marker) must still show the real document
+    # title, resolved from the manifest by filename.
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(
+        """
+documents:
+  - doc_id: nepm-asc-2013-vol08
+    title: "NEPM (Assessment of Site Contamination) 2013 compilation - Volume 8 of 22"
+    filename: F2013C00288VOL08.pdf
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ce, "MANIFEST_PATH", manifest)
+    monkeypatch.setattr(ce, "_manifest_titles", None)
+    monkeypatch.setattr(ce, "_manifest_titles_by_filename", None)
+
+    payload = _payload(
+        [
+            {
+                "reference_id": "ref-1",
+                "file_path": "/kb/F2013C00288VOL08.pdf",
+                "chunk_id": "page_45_chunk_2",
+                "content": "Continuation text with no source marker prefix, HIL values for lead.",
+            }
+        ],
+        [{"reference_id": "ref-1", "file_path": "/kb/F2013C00288VOL08.pdf"}],
+    )
+    (citation,) = ce.extract_citations_from_rag_payload(payload)
+    assert citation["source"] == "F2013C00288VOL08.pdf"
+    assert citation["title"] == (
+        "NEPM (Assessment of Site Contamination) 2013 compilation - Volume 8 of 22"
+    )
