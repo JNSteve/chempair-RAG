@@ -30,26 +30,54 @@ MAX_SNIPPET_LENGTH = 220
 # instead of the raw filename stem ("F2013C00288VOL02"). Improving a title
 # is a one-line manifest edit — no re-ingest needed.
 MANIFEST_PATH = Path(__file__).resolve().parent / "corpus" / "manifest.yaml"
+# Two indexes into the same manifest: doc_id -> title (from marker chunks)
+# and filename -> title (for chunks that lost the marker — LightRAG splits a
+# page into several chunks and only the first keeps the prefix, so a citation
+# should still show the real document name via its filename).
 _manifest_titles: dict[str, str] | None = None
+_manifest_titles_by_filename: dict[str, str] | None = None
 
 
-def _load_manifest_titles() -> dict[str, str]:
-    """doc_id -> title from the corpus manifest; empty (and harmless) when
-    the manifest is absent, empty, or unreadable."""
-    global _manifest_titles
-    if _manifest_titles is None:
-        titles: dict[str, str] = {}
+def _load_manifest_indexes() -> tuple[dict[str, str], dict[str, str]]:
+    """(doc_id -> title, filename -> title) from the corpus manifest; empty
+    (and harmless) when the manifest is absent, empty, or unreadable."""
+    global _manifest_titles, _manifest_titles_by_filename
+    if _manifest_titles is None or _manifest_titles_by_filename is None:
+        by_doc_id: dict[str, str] = {}
+        by_filename: dict[str, str] = {}
         try:
             import yaml
 
             manifest = yaml.safe_load(MANIFEST_PATH.read_text(encoding="utf-8")) or {}
             for doc in manifest.get("documents") or []:
-                if isinstance(doc, dict) and doc.get("doc_id") and doc.get("title"):
-                    titles[str(doc["doc_id"])] = str(doc["title"])
+                if not isinstance(doc, dict) or not doc.get("title"):
+                    continue
+                title = str(doc["title"])
+                if doc.get("doc_id"):
+                    by_doc_id[str(doc["doc_id"])] = title
+                if doc.get("filename"):
+                    by_filename[str(doc["filename"])] = title
         except Exception:
             pass
-        _manifest_titles = titles
-    return _manifest_titles
+        _manifest_titles = by_doc_id
+        _manifest_titles_by_filename = by_filename
+    return _manifest_titles, _manifest_titles_by_filename
+
+
+def _load_manifest_titles() -> dict[str, str]:
+    """doc_id -> title (back-compat accessor)."""
+    return _load_manifest_indexes()[0]
+
+
+def _manifest_title(doc_id: str | None, filename: str | None) -> str | None:
+    """Resolve a document's human title from the manifest by doc_id first,
+    then by filename. Returns None when neither is registered."""
+    by_doc_id, by_filename = _load_manifest_indexes()
+    if doc_id and doc_id in by_doc_id:
+        return by_doc_id[doc_id]
+    if filename and filename in by_filename:
+        return by_filename[filename]
+    return None
 
 
 SOURCE_MARKER_PATTERN = re.compile(
@@ -176,9 +204,7 @@ def extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
         if marker:
             source = marker["filename"]
             locator = _marker_locator(marker)
-            title = _load_manifest_titles().get(marker["doc_id"]) or _citation_title(
-                source
-            )
+            title = _manifest_title(marker["doc_id"], source) or _citation_title(source)
         else:
             source = _file_source_name(file_path, reference_id)
             locator = _citation_locator(
@@ -187,7 +213,9 @@ def extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
                 primary_chunk.get("chunk_id"),
                 content,
             )
-            title = _citation_title(source)
+            # Marker-less chunks (page continuations) still resolve their
+            # real title from the manifest via filename.
+            title = _manifest_title(None, source) or _citation_title(source)
 
         location = (source, locator)
         if location in seen_locations:
