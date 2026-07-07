@@ -42,7 +42,8 @@ documents:
   filename: 22p3916-sampling-design-guidelines-part2.pdf
   sha256: 7d1e93065b465ac449cfa00cf36d2369d752d0b9674084cbca3071501814af1c
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T10:57:31+00:00'
+  ingested_sha256: 7d1e93065b465ac449cfa00cf36d2369d752d0b9674084cbca3071501814af1c
 - doc_id: nepm-asc-2013-combined
   title: National Environment Protection (Assessment of Site Contamination) Measure
     1999 (2013 compilation)
@@ -54,7 +55,8 @@ documents:
   filename: NEPM_2013 (1).pdf
   sha256: f09c7f6ad32dd0916bb8b2a23ae9441c28a30f532eaf3f154298f3e608a7bce0
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T11:24:22+00:00'
+  ingested_sha256: f09c7f6ad32dd0916bb8b2a23ae9441c28a30f532eaf3f154298f3e608a7bce0
 - doc_id: pfas-nemp-v3
   title: PFAS National Environmental Management Plan, Version 3.0
   family: OTHER
@@ -65,7 +67,8 @@ documents:
   filename: pfas-nemp-3.pdf
   sha256: abcc5c28177e2a96747e292e991ae46dd3d8a0099b3ca80e1750192411ce196e
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T12:19:58+00:00'
+  ingested_sha256: abcc5c28177e2a96747e292e991ae46dd3d8a0099b3ca80e1750192411ce196e
 - doc_id: qld-waste-framework
   title: QLD Waste Framework
   family: QLD
@@ -76,7 +79,8 @@ documents:
   filename: QLD_Waste_Framework.pdf
   sha256: a62741be73ac25dcb331a31d3768cb739ae27b3809a3752d94ccce116812b540
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T12:24:19+00:00'
+  ingested_sha256: a62741be73ac25dcb331a31d3768cb739ae27b3809a3752d94ccce116812b540
 - doc_id: qld-waste-operating-era
   title: QLD Waste-Related Environmentally Relevant Activities (ERA) Operating Guidance
   family: QLD
@@ -87,7 +91,8 @@ documents:
   filename: QLD_Waste_Operating_ERA.pdf
   sha256: 4561d816118b2ce9bd37a8ea3d28129a6e577fbd493400489ed91583ea8d10b3
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T12:31:34+00:00'
+  ingested_sha256: 4561d816118b2ce9bd37a8ea3d28129a6e577fbd493400489ed91583ea8d10b3
 - doc_id: nepm-asc-2013-vol01
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 1 of 22
   family: NEPM
@@ -98,7 +103,8 @@ documents:
   filename: F2013C00288VOL01.pdf
   sha256: d05203a30717777e292ab8ea4e574c0af7941b50f030adbb0a19f97e83b07071
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T12:35:15+00:00'
+  ingested_sha256: d05203a30717777e292ab8ea4e574c0af7941b50f030adbb0a19f97e83b07071
 - doc_id: nepm-asc-2013-vol02
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 2 of 22
   family: NEPM
@@ -109,7 +115,8 @@ documents:
   filename: F2013C00288VOL02.pdf
   sha256: 17788fb3339c5163139dc72cf67234b2276de9115d272ae7770f36c4bd77ad99
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T13:06:21+00:00'
+  ingested_sha256: 17788fb3339c5163139dc72cf67234b2276de9115d272ae7770f36c4bd77ad99
 - doc_id: nepm-asc-2013-vol03
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 3 of 22
   family: NEPM
@@ -120,7 +127,8 @@ documents:
   filename: F2013C00288VOL03.pdf
   sha256: 30254dc4b83232b4cf5538e6c8e2cddfa9b0514355856ab4d4e5c45646359e21
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T21:38:25+00:00'
+  ingested_sha256: 30254dc4b83232b4cf5538e6c8e2cddfa9b0514355856ab4d4e5c45646359e21
 - doc_id: nepm-asc-2013-vol04
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 4 of 22
   family: NEPM
@@ -131,7 +139,8 @@ documents:
   filename: F2013C00288VOL04.pdf
   sha256: 224f9a77ad01b484f8686818cf8396f672c3f016e7ea50e8b83dc02d96dbd971
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T21:51:32+00:00'
+  ingested_sha256: 224f9a77ad01b484f8686818cf8396f672c3f016e7ea50e8b83dc02d96dbd971
 - doc_id: nepm-asc-2013-vol05
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 5 of 22
   family: NEPM
@@ -142,7 +151,8 @@ documents:
   filename: F2013C00288VOL05.pdf
   sha256: 31ff2d4cc452157fd28f028856874ec8923783812f201cb5a643a8bc8a549a4f
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T22:06:49+00:00'
+  ingested_sha256: 31ff2d4cc452157fd28f028856874ec8923783812f201cb5a643a8bc8a549a4f
 - doc_id: nepm-asc-2013-vol06
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 6 of 22
   family: NEPM
@@ -153,7 +163,8 @@ documents:
   filename: F2013C00288VOL06.pdf
   sha256: 2b0977c433f3c8dae888d9a7fec8a6df8a52ffbfdc2cce122b5cac7a1a7ed361
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T22:13:57+00:00'
+  ingested_sha256: 2b0977c433f3c8dae888d9a7fec8a6df8a52ffbfdc2cce122b5cac7a1a7ed361
 - doc_id: nepm-asc-2013-vol07
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 7 of 22
   family: NEPM
@@ -164,7 +175,8 @@ documents:
   filename: F2013C00288VOL07.pdf
   sha256: 56eea1e7d2cdd7e7233d40e62752165b7a66571e2ffc81843adfe7842ff9b81f
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T22:30:08+00:00'
+  ingested_sha256: 56eea1e7d2cdd7e7233d40e62752165b7a66571e2ffc81843adfe7842ff9b81f
 - doc_id: nepm-asc-2013-vol08
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 8 of 22
   family: NEPM
@@ -175,7 +187,8 @@ documents:
   filename: F2013C00288VOL08.pdf
   sha256: 51eecfb5563866c3db4ce88640c571d7ab4b7fd229bfeec800cd000f585a4237
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T23:08:34+00:00'
+  ingested_sha256: 51eecfb5563866c3db4ce88640c571d7ab4b7fd229bfeec800cd000f585a4237
 - doc_id: nepm-asc-2013-vol09
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 9 of 22
   family: NEPM
@@ -186,7 +199,8 @@ documents:
   filename: F2013C00288VOL09.pdf
   sha256: 49a5d3e297b909b6c8599f5823f82a3075ed86308fff0b6bdf92c9bc2c5a6f96
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T23:11:14+00:00'
+  ingested_sha256: 49a5d3e297b909b6c8599f5823f82a3075ed86308fff0b6bdf92c9bc2c5a6f96
 - doc_id: nepm-asc-2013-vol10
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 10 of 22
   family: NEPM
@@ -197,7 +211,8 @@ documents:
   filename: F2013C00288VOL10.pdf
   sha256: 4ad3c64f7b3d3a43dee41121f44b9ba12561799934aa95e93191999548d7402f
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T23:34:33+00:00'
+  ingested_sha256: 4ad3c64f7b3d3a43dee41121f44b9ba12561799934aa95e93191999548d7402f
 - doc_id: nepm-asc-2013-vol11
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 11 of 22
   family: NEPM
@@ -208,7 +223,8 @@ documents:
   filename: F2013C00288VOL11.pdf
   sha256: 2244573b64deed55d832b508af093a18751e4c9ba29ea66fb7cf9d8f36feba96
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T23:41:04+00:00'
+  ingested_sha256: 2244573b64deed55d832b508af093a18751e4c9ba29ea66fb7cf9d8f36feba96
 - doc_id: nepm-asc-2013-vol12
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 12 of 22
   family: NEPM
@@ -219,7 +235,8 @@ documents:
   filename: F2013C00288VOL12.pdf
   sha256: b21ae52314917c62313b00a184c1d76d1d77dea479f006eb4d48e0921d59a1f3
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T23:50:31+00:00'
+  ingested_sha256: b21ae52314917c62313b00a184c1d76d1d77dea479f006eb4d48e0921d59a1f3
 - doc_id: nepm-asc-2013-vol13
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 13 of 22
   family: NEPM
@@ -230,7 +247,8 @@ documents:
   filename: F2013C00288VOL13.pdf
   sha256: 48fad50773efc007a7dc3d40156eb3e3622ae24cd09d1f799311d4c45d70a6a3
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-06T23:58:19+00:00'
+  ingested_sha256: 48fad50773efc007a7dc3d40156eb3e3622ae24cd09d1f799311d4c45d70a6a3
 - doc_id: nepm-asc-2013-vol14
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 14 of 22
   family: NEPM
@@ -241,7 +259,8 @@ documents:
   filename: F2013C00288VOL14.pdf
   sha256: f5678b66c3e78805b9abab247c2e385d402c0e88a5365825d018843d237683e6
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:01:56+00:00'
+  ingested_sha256: f5678b66c3e78805b9abab247c2e385d402c0e88a5365825d018843d237683e6
 - doc_id: nepm-asc-2013-vol15
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 15 of 22
   family: NEPM
@@ -252,7 +271,8 @@ documents:
   filename: F2013C00288VOL15.pdf
   sha256: c066c160155e3942ee508b7c48038a062864aa1a4c24e9537a588c8253fda198
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:08:47+00:00'
+  ingested_sha256: c066c160155e3942ee508b7c48038a062864aa1a4c24e9537a588c8253fda198
 - doc_id: nepm-asc-2013-vol16
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 16 of 22
   family: NEPM
@@ -263,7 +283,8 @@ documents:
   filename: F2013C00288VOL16.pdf
   sha256: 30c0d0aa9a4445fa71e92a83854b1459c7b0d9e851a4241a84187d5f29b0fb16
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:12:16+00:00'
+  ingested_sha256: 30c0d0aa9a4445fa71e92a83854b1459c7b0d9e851a4241a84187d5f29b0fb16
 - doc_id: nepm-asc-2013-vol17
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 17 of 22
   family: NEPM
@@ -274,7 +295,8 @@ documents:
   filename: F2013C00288VOL17.pdf
   sha256: 0b37e4e307006ece6c3dffd5b710ab9fd62cca6760e8c8f4f59ddca89238fdf5
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:17:35+00:00'
+  ingested_sha256: 0b37e4e307006ece6c3dffd5b710ab9fd62cca6760e8c8f4f59ddca89238fdf5
 - doc_id: nepm-asc-2013-vol18
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 18 of 22
   family: NEPM
@@ -285,7 +307,8 @@ documents:
   filename: F2013C00288VOL18.pdf
   sha256: 86da5baa37b912b79d1e91240d03d5ee0a44784dd25abf8dd58f9268aeaac40e
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:19:32+00:00'
+  ingested_sha256: 86da5baa37b912b79d1e91240d03d5ee0a44784dd25abf8dd58f9268aeaac40e
 - doc_id: nepm-asc-2013-vol19
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 19 of 22
   family: NEPM
@@ -296,7 +319,8 @@ documents:
   filename: F2013C00288VOL19.pdf
   sha256: 13e75cc5b53a1e2b8e9f53d3be2ff6605da39758d0c24b17df5a6fac6d72be2c
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:32:32+00:00'
+  ingested_sha256: 13e75cc5b53a1e2b8e9f53d3be2ff6605da39758d0c24b17df5a6fac6d72be2c
 - doc_id: nepm-asc-2013-vol20
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 20 of 22
   family: NEPM
@@ -307,7 +331,8 @@ documents:
   filename: F2013C00288VOL20.pdf
   sha256: 843124bdf11d58cfb800ba8f1da66e56c133d5ac2fbba599fb2bcde4f1909f96
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:37:34+00:00'
+  ingested_sha256: 843124bdf11d58cfb800ba8f1da66e56c133d5ac2fbba599fb2bcde4f1909f96
 - doc_id: nepm-asc-2013-vol21
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 21 of 22
   family: NEPM
@@ -318,7 +343,8 @@ documents:
   filename: F2013C00288VOL21.pdf
   sha256: 6fe71412f8a116fac6cc9cefe09c4ee975722f94cabe736299667fa0a166a9f7
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:40:07+00:00'
+  ingested_sha256: 6fe71412f8a116fac6cc9cefe09c4ee975722f94cabe736299667fa0a166a9f7
 - doc_id: nepm-asc-2013-vol22
   title: NEPM (Assessment of Site Contamination) 2013 compilation — Volume 22 of 22
   family: NEPM
@@ -329,7 +355,8 @@ documents:
   filename: F2013C00288VOL22.pdf
   sha256: 8a7329db12a162c27f79689407fca8363f2cfa968cdd55035fb1d51ec98154ae
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:41:06+00:00'
+  ingested_sha256: 8a7329db12a162c27f79689407fca8363f2cfa968cdd55035fb1d51ec98154ae
 - doc_id: nsw-2014-waste-classification-part1
   title: 'NSW EPA Waste Classification Guidelines Part 1: Classifying Waste'
   family: NSW
@@ -340,7 +367,8 @@ documents:
   filename: 140796-classify-waste.pdf
   sha256: 7f63332ba322d8af28eb20e84ca0a2dd84a211bc4b3c155a6d501ba035afd4c9
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:48:06+00:00'
+  ingested_sha256: 7f63332ba322d8af28eb20e84ca0a2dd84a211bc4b3c155a6d501ba035afd4c9
 - doc_id: nsw-2020-consultants-reporting
   title: NSW EPA Guidelines for Consultants Reporting on Contaminated Land
   family: NSW
@@ -351,4 +379,5 @@ documents:
   filename: 20p2233-consultants-reporting-on-contaminated-land-guidelines.pdf
   sha256: 8f7b68c81c3d47d3956183a6960a6b22de8cddc1135fa23c246f242b02e012f4
   source_url: null
-  ingested_at: null
+  ingested_at: '2026-07-07T00:56:05+00:00'
+  ingested_sha256: 8f7b68c81c3d47d3956183a6960a6b22de8cddc1135fa23c246f242b02e012f4
