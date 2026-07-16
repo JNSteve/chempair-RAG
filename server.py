@@ -161,7 +161,8 @@ PROJECT_ONLY_ANSWER_SYSTEM = (
     "For criterion or exceedance-value questions, prefer the project criterionValue first, then the matching threshold under the selected criterion.\n"
     "Do not substitute a threshold from a different medium, pathway, depth band, or land use.\n"
     "Map context figures (contour areas, exceedance zones, hotspot counts) are computed by the application; report them exactly with their units.\n"
-    "Do not calculate or estimate spatial areas or distances yourself; if a spatial figure is not in the map context, say the map does not provide it.\n"
+    "Map context figures apply to the mapped analyte named in mapContext.selectedAnalyte — e.g. contourAreaM2 IS the contour area for that analyte; report it when asked about that analyte's contour or extent.\n"
+    "Do not calculate or estimate spatial areas or distances yourself; if a spatial figure is genuinely absent from the map context, say the map does not provide it.\n"
     "If the project context does not contain the answer, say so plainly.\n"
     "Prefer short paragraphs. Avoid decorative markdown and unnecessary bullet points."
 )
@@ -826,6 +827,72 @@ def _top_exceedance_text(ctx: WorkspaceContext, limit: int = 3) -> str | None:
             rendered.append(f"{analyte} at {sample} = {value}")
 
     return "; ".join(rendered) if rendered else None
+
+
+def _format_map_number(value: float | int) -> str:
+    return f"{value:g}"
+
+
+def _try_answer_map_spatial(question: str, ctx: WorkspaceContext) -> str | None:
+    """Deterministic answers for exact map figures (PRD_101 Phase A).
+
+    App-computed spatial figures (contour area, zone counts) are answered
+    verbatim from mapContext instead of via the LLM — the grounding rules
+    make the model refuse figures that are not literally labelled for the
+    asked analyte, so exact-figure questions get the criterion-lookup
+    treatment: deterministic, or an honest 'not on the map'.
+    """
+    m = ctx.mapContext
+    if not m:
+        return None
+
+    key = _normalise_text(question)
+    analyte = m.selectedAnalyte or "the mapped analyte"
+    view = (
+        f' on the saved map view "{m.mapViewName}"'
+        if m.mapViewName
+        else " on the saved site map"
+    )
+    depth = f" over the {m.depthFilter} depth interval" if m.depthFilter else ""
+
+    asks_contour = "contour" in key or "footprint" in key
+    asks_zones = "zone" in key or "hotspot" in key or "hot spot" in key
+
+    if asks_contour:
+        if m.contourAreaM2 is not None:
+            return (
+                f"The drawn contour area{view} is about "
+                f"{_format_map_number(m.contourAreaM2)} m2. The mapped analyte is "
+                f"{analyte}{depth}."
+            )
+        return (
+            "The saved site map does not include a drawn contour area, "
+            "so I can't give a contour size from the map."
+        )
+
+    if asks_zones:
+        parts: list[str] = []
+        if m.exceedanceZoneCount is not None:
+            zone_text = (
+                f"{m.exceedanceZoneCount} exceedance zone"
+                f"{'s' if m.exceedanceZoneCount != 1 else ''}"
+            )
+            if m.criticalZoneCount is not None:
+                zone_text += (
+                    f" ({m.criticalZoneCount} critical)"
+                    if m.criticalZoneCount
+                    else " (none critical)"
+                )
+            parts.append(zone_text)
+        if m.hotspotDiameterM is not None:
+            parts.append(
+                f"hotspot zones are drawn at {_format_map_number(m.hotspotDiameterM)} m diameter"
+            )
+        if not parts:
+            return None
+        return f"The saved site map shows {' and '.join(parts)} for {analyte}{depth}."
+
+    return None
 
 
 def _try_answer_project_evidence(
@@ -1785,35 +1852,46 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
             debug.used_project_fields = handoff.used_project_fields
 
             if route_used == "project_only" and result is None:
-                direct_context_answer, direct_context_fields = (
-                    _try_answer_project_evidence(
-                        effective_question,
-                        req.context,
-                        handoff.reason,
-                    )
+                # Exact map figures answer deterministically and take
+                # precedence — "how many zones on the map" must not fall
+                # into the exceedance-evidence template below.
+                map_answer = _try_answer_map_spatial(
+                    effective_question,
+                    req.context,
                 )
-                if direct_context_answer:
-                    result = direct_context_answer
-                    debug.used_project_fields = direct_context_fields
-                else:
-                    direct_context_answer = _try_answer_direct_criterion_lookup(
-                        effective_question,
-                        req.context,
+                if map_answer:
+                    result = map_answer
+                    debug.used_project_fields = ["mapContext"]
+                if result is None:
+                    direct_context_answer, direct_context_fields = (
+                        _try_answer_project_evidence(
+                            effective_question,
+                            req.context,
+                            handoff.reason,
+                        )
                     )
                     if direct_context_answer:
                         result = direct_context_answer
+                        debug.used_project_fields = direct_context_fields
                     else:
-                        answer_prompt = (
-                            f"User question: {effective_question}\n\n"
-                            f"Relevant project context JSON:\n"
-                            f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
+                        direct_context_answer = _try_answer_direct_criterion_lookup(
+                            effective_question,
+                            req.context,
                         )
-                        result = await openai_complete_if_cache(
-                            LLM_MODEL,
-                            answer_prompt,
-                            system_prompt=PROJECT_ONLY_ANSWER_SYSTEM,
-                            api_key=os.getenv("OPENAI_API_KEY"),
-                        )
+                        if direct_context_answer:
+                            result = direct_context_answer
+                        else:
+                            answer_prompt = (
+                                f"User question: {effective_question}\n\n"
+                                f"Relevant project context JSON:\n"
+                                f"{json.dumps(filtered, ensure_ascii=False, indent=2)}"
+                            )
+                            result = await openai_complete_if_cache(
+                                LLM_MODEL,
+                                answer_prompt,
+                                system_prompt=PROJECT_ONLY_ANSWER_SYSTEM,
+                                api_key=os.getenv("OPENAI_API_KEY"),
+                            )
                 sections.site_context = result
             else:
                 rag_query = handoff.kb_query

@@ -124,3 +124,59 @@ def test_spatial_question_without_map_context_keeps_existing_routing():
         "map_spatial_evidence",
         "map_spatial_evidence_with_regulatory_support",
     }
+
+
+def test_deterministic_contour_answer_uses_map_figure():
+    import server
+
+    ctx = _ctx_with_map()
+    answer = server._try_answer_map_spatial("How big is the arsenic contour area?", ctx)
+    assert answer is not None
+    assert "2296 m2" in answer
+    assert "Arsenic" in answer
+    assert "Ducat baseline" in answer
+
+
+def test_deterministic_contour_answer_honest_when_absent():
+    import server
+
+    payload = _map_context_payload()
+    payload.pop("contourAreaM2")
+    ctx = WorkspaceContext.model_validate(
+        {
+            "schemaVersion": 5,
+            "projectState": {"project": {"projectName": "Ducat"}},
+            "mapContext": payload,
+        }
+    )
+    answer = server._try_answer_map_spatial("How big is the contour area?", ctx)
+    assert answer is not None
+    assert "does not include a drawn contour area" in answer
+
+
+def test_deterministic_zone_answer_counts_zones():
+    import server
+
+    ctx = _ctx_with_map()
+    answer = server._try_answer_map_spatial(
+        "How many exceedance zones are on the map, and how many are critical?", ctx
+    )
+    assert answer is not None
+    assert "3 exceedance zones" in answer
+    assert "1 critical" in answer
+
+
+def test_deterministic_map_answer_skips_non_spatial_questions():
+    import server
+
+    ctx = _ctx_with_map()
+    assert server._try_answer_map_spatial("what is the hil a for arsenic?", ctx) is None
+
+
+def test_deterministic_map_answer_skips_without_map_context():
+    import server
+
+    ctx = WorkspaceContext.model_validate(
+        {"schemaVersion": 4, "projectState": {"project": {"projectName": "Ducat"}}}
+    )
+    assert server._try_answer_map_spatial("how big is the contour area?", ctx) is None
