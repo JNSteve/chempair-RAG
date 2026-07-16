@@ -240,6 +240,10 @@ def build_grounded_context(
         # Small, app-computed spatial summary — always passed through when
         # present so spatial questions answer from map evidence.
         snapshot["mapContext"] = ctx.mapContext.model_dump(exclude_none=True)
+    if ctx.saqpContext:
+        # Sampling-plan sufficiency advisory (app-computed) — always passed
+        # through so plan/coverage questions answer from plan evidence.
+        snapshot["saqpContext"] = ctx.saqpContext.model_dump(exclude_none=True)
 
     matched_analyte_keys = {
         normalise_text(analyte) for analyte in grounded.matched_analytes

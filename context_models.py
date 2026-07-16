@@ -200,6 +200,31 @@ class MapContext(BaseModel):
     capturedAtIso: Optional[str] = None
 
 
+class SaqpContext(BaseModel):
+    """Summary of the project's sampling plan (SAQP) and its sufficiency
+    advisory (schema v5, optional). All figures are computed by the app's
+    sufficiency engine — Alfie reports them verbatim."""
+
+    model_config = ConfigDict(extra="allow")
+
+    planStatus: Optional[str] = None
+    sufficiencyStatus: Optional[str] = None
+    computedStatus: Optional[str] = None
+    plannedPoints: Optional[int] = None
+    requiredPoints: Optional[int] = None
+    areaHa: Optional[float] = None
+    gridEnabled: Optional[bool] = None
+    gridSizeM: Optional[float] = None
+    rulesetKey: Optional[str] = None
+    rulesetVersion: Optional[str] = None
+    advisoryMessage: Optional[str] = None
+    overrideActive: Optional[bool] = None
+    overrideJustification: Optional[str] = None
+    completedPoints: Optional[int] = None
+    skippedPoints: Optional[int] = None
+    relocatedPoints: Optional[int] = None
+
+
 class ProjectState(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -261,6 +286,7 @@ class WorkspaceContext(BaseModel):
     projectState: Optional[ProjectState] = None
     retrievalContext: Optional[RetrievalContext] = None
     mapContext: Optional[MapContext] = None
+    saqpContext: Optional[SaqpContext] = None
     conversation: Optional[List[ConversationMessage]] = Field(
         default=None, max_length=MAX_CONVERSATION_MESSAGES
     )
@@ -559,6 +585,39 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             parts.append(f"Average contaminated depth: {m.averageDepthM:g} m")
         if parts:
             sections.append("## Map Context\n" + "\n".join(parts))
+
+    if ctx.saqpContext:
+        s = ctx.saqpContext
+        parts = []
+        if s.planStatus:
+            parts.append(f"Plan status: {s.planStatus}")
+        if s.sufficiencyStatus:
+            parts.append(f"Sufficiency: {s.sufficiencyStatus}")
+        if s.plannedPoints is not None:
+            planned = f"Planned points: {s.plannedPoints}"
+            if s.requiredPoints is not None:
+                planned += f" (guidance minimum {s.requiredPoints})"
+            parts.append(planned)
+        if s.areaHa is not None:
+            parts.append(f"Assessment area: {s.areaHa:g} ha")
+        if s.gridSizeM is not None:
+            parts.append(f"Grid spacing: {s.gridSizeM:g} m")
+        if s.rulesetKey:
+            ruleset = f"Ruleset: {s.rulesetKey}"
+            if s.rulesetVersion:
+                ruleset += f" v{s.rulesetVersion}"
+            parts.append(ruleset)
+        if s.advisoryMessage:
+            parts.append(f"Advisory: {s.advisoryMessage}")
+        if s.overrideActive:
+            override = "Manual override active"
+            if s.overrideJustification:
+                override += f": {s.overrideJustification}"
+            parts.append(override)
+        if s.completedPoints is not None:
+            parts.append(f"Field progress: {s.completedPoints} completed")
+        if parts:
+            sections.append("## Sampling Plan (SAQP)\n" + "\n".join(parts))
 
     if retrieval_context:
         parts = []

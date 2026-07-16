@@ -166,3 +166,37 @@ profiles:
       matchedSampleCodes: []
       questionTokens: []
       retrievedRows: []
+
+  # Schema v5 variant with a sampling-plan advisory attached (PRD_101
+  # Phase B). Exercises saqpContext routing and deterministic answers.
+  ducat_soil_saqp:
+    schemaVersion: 5
+    generatedAtIso: "2026-07-16T10:00:00.000Z"
+    requiresProjectContext: true
+    targetAnalytes: []
+    targetSampleCodes: []
+    projectState:
+      project: *ducat_project
+      selectedCriteria: *ducat_criteria
+      exceedanceSummary: *ducat_exceedance_summary
+    saqpContext:
+      planStatus: approved
+      sufficiencyStatus: borderline
+      computedStatus: borderline
+      plannedPoints: 8
+      requiredPoints: 9
+      areaHa: 0.5
+      gridEnabled: true
+      gridSizeM: 25
+      rulesetKey: nepm-b2-density
+      rulesetVersion: "2026.1"
+      advisoryMessage: "Sampling plan is near guidance thresholds; review before field execution."
+      overrideActive: false
+      completedPoints: 0
+      skippedPoints: 0
+      relocatedPoints: 0
+    retrievalContext:
+      matchedAnalytes: []
+      matchedSampleCodes: []
+      questionTokens: []
+      retrievedRows: []

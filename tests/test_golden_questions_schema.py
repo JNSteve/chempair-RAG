@@ -24,6 +24,7 @@ VALID_CATEGORIES = {
     "table_lookup",
     "practice_guidance",
     "map_spatial",
+    "saqp",
 }
 VALID_EXPECT_FIELDS = {
     "route_used",
