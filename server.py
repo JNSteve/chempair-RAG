@@ -1751,9 +1751,7 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
                 session_id,
                 # Field names only (never values) — shows which map figures
                 # the client actually sent, e.g. whether contourAreaM2 arrived.
-                ",".join(
-                    sorted(req.context.mapContext.model_dump(exclude_none=True))
-                )
+                ",".join(sorted(req.context.mapContext.model_dump(exclude_none=True)))
                 if req.context.mapContext
                 else None,
             )
