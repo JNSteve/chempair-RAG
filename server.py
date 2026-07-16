@@ -1743,8 +1743,11 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
         if _has_usable_context(req.context):
             context_used = True
             logger.info(
-                "context_accepted schema_version=%s project=%s session=%s map_keys=%s",
+                "context_accepted schema_version=%s client_rev=%s project=%s session=%s map_keys=%s",
                 req.context.schemaVersion,
+                # Client build marker (extra field, absent from old bundles) —
+                # proves which frontend build produced this request.
+                getattr(req.context, "clientRevision", None),
                 req.context.projectState.project.projectName
                 if req.context.projectState and req.context.projectState.project
                 else None,
