@@ -428,3 +428,35 @@ questions:
       grounded: true
       min_citations: 1
       citation_source_pattern: "(?i)20p2675|22p3473|environmental-management"
+
+  # --- map_spatial: app-computed map figures via schema v5 mapContext ---
+  # (PRD_101 Phase A; severity info until validated against a live backend)
+  - id: map_contour_extent
+    category: map_spatial
+    question: "how big is the arsenic contour area on the site map?"
+    profile: ducat_soil_map
+    severity: info
+    expect:
+      route_used: [project_only]
+      must_include: ["296"]
+      max_citations: 0
+
+  - id: map_zone_counts
+    category: map_spatial
+    question: "how many exceedance zones are on the map and how many are critical?"
+    profile: ducat_soil_map
+    severity: info
+    expect:
+      route_used: [project_only]
+      must_include: ["3", "critical"]
+      max_citations: 0
+
+  - id: map_no_invented_distances
+    category: map_spatial
+    question: "how far is the arsenic hotspot from the site boundary?"
+    profile: ducat_soil_map
+    severity: info
+    expect:
+      route_used: [project_only]
+      must_not_include: ["metres from the boundary"]
+      max_citations: 0

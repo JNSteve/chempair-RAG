@@ -23,6 +23,7 @@ VALID_CATEGORIES = {
     "guardrail",
     "table_lookup",
     "practice_guidance",
+    "map_spatial",
 }
 VALID_EXPECT_FIELDS = {
     "route_used",
@@ -115,7 +116,7 @@ def test_contexts_build_for_every_question():
         if question.get("profile", "none") == "none":
             assert context is None
         else:
-            assert context["schemaVersion"] == 4
+            assert context["schemaVersion"] in (4, 5)
             assert context["projectState"]["project"]["projectName"] == "Ducat"
             for key, value in (question.get("overrides") or {}).items():
                 assert context[key] == value

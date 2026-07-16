@@ -126,3 +126,43 @@ profiles:
       matchedSampleCodes: []
       questionTokens: []
       retrievedRows: []
+
+  # Schema v5 variant: same Ducat project with a saved-map summary attached
+  # (PRD_101 Phase A). Exercises mapContext routing and grounding.
+  ducat_soil_map:
+    schemaVersion: 5
+    generatedAtIso: "2026-07-16T10:00:00.000Z"
+    requiresProjectContext: true
+    targetAnalytes: []
+    targetSampleCodes: []
+    projectEvidenceSummary:
+      project: *ducat_project
+      selectedCriteria: *ducat_criteria
+      exceedanceSummary: *ducat_exceedance_summary
+      topExceedancesByMagnitude: *ducat_top_exceedances
+      matchedAnalytes: []
+      matchedSampleLocations: [BH20, TP01, BH23, TP07]
+      relevantResultRows: *ducat_rows
+    projectState:
+      project: *ducat_project
+      selectedCriteria: *ducat_criteria
+      exceedanceSummary: *ducat_exceedance_summary
+      exceedances: *ducat_top_exceedances
+    mapContext:
+      mapViewName: Ducat baseline
+      selectedAnalyte: Arsenic
+      selectedCriteriaName: NEPM 2013 HIL-A residential
+      criteriaValue: 100
+      criteriaUnit: mg/kg
+      depthFilter: 0-1 m
+      concentrationPointCount: 9
+      contourAreaM2: 2296
+      exceedanceZoneCount: 3
+      criticalZoneCount: 1
+      hotspotDiameterM: 10
+      capturedAtIso: "2026-07-16T09:55:00.000Z"
+    retrievalContext:
+      matchedAnalytes: []
+      matchedSampleCodes: []
+      questionTokens: []
+      retrievedRows: []
