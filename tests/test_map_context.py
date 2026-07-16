@@ -89,7 +89,9 @@ def test_grounded_context_omits_map_context_when_absent():
 def test_spatial_extent_detection():
     assert is_spatial_extent_question("how big is the arsenic contour")
     assert is_spatial_extent_question("what is the contaminated area on site")
-    assert is_spatial_extent_question("is contamination contained within the site boundary")
+    assert is_spatial_extent_question(
+        "is contamination contained within the site boundary"
+    )
     assert not is_spatial_extent_question("what is the hil a for arsenic")
 
 
