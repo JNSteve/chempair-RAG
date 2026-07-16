@@ -34,6 +34,14 @@ def _map_context_payload() -> dict:
         "hotspotCount": 2,
         "hotspotDiameterM": 10,
         "concentrationPointCount": 9,
+        "volumeM3": 320,
+        "massTonnes": 512,
+        "contaminatedAreaM2": 410,
+        "averageDepthM": 0.78,
+        "volumeConfidence": "moderate",
+        "volumeDepthAssumed": False,
+        "exceedingLocations": 5,
+        "totalLocations": 12,
     }
 
 
@@ -164,6 +172,7 @@ def test_deterministic_zone_answer_counts_zones():
     assert answer is not None
     assert "3 exceedance zones" in answer
     assert "1 critical" in answer
+    assert "9 mapped sample points" in answer
 
 
 def test_deterministic_map_answer_skips_non_spatial_questions():
@@ -180,3 +189,45 @@ def test_deterministic_map_answer_skips_without_map_context():
         {"schemaVersion": 4, "projectState": {"project": {"projectName": "Ducat"}}}
     )
     assert server._try_answer_map_spatial("how big is the contour area?", ctx) is None
+
+
+def test_deterministic_volume_answer():
+    import server
+
+    ctx = _ctx_with_map()
+    answer = server._try_answer_map_spatial(
+        "What volume of contaminated soil is on the map?", ctx
+    )
+    assert answer is not None
+    assert "320 m3" in answer
+    assert "512 t" in answer
+    assert "410 m2" in answer
+    assert "0.78 m" in answer
+    assert "5 of 12 mapped locations" in answer
+
+
+def test_deterministic_volume_answer_honest_when_absent():
+    import server
+
+    payload = _map_context_payload()
+    for field in (
+        "volumeM3",
+        "massTonnes",
+        "contaminatedAreaM2",
+        "averageDepthM",
+        "volumeConfidence",
+        "volumeDepthAssumed",
+        "exceedingLocations",
+        "totalLocations",
+    ):
+        payload.pop(field, None)
+    ctx = WorkspaceContext.model_validate(
+        {
+            "schemaVersion": 5,
+            "projectState": {"project": {"projectName": "Ducat"}},
+            "mapContext": payload,
+        }
+    )
+    answer = server._try_answer_map_spatial("how many tonnes of soil?", ctx)
+    assert answer is not None
+    assert "does not include a volume estimate" in answer

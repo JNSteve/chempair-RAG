@@ -161,7 +161,7 @@ PROJECT_ONLY_ANSWER_SYSTEM = (
     "For criterion or exceedance-value questions, prefer the project criterionValue first, then the matching threshold under the selected criterion.\n"
     "Do not substitute a threshold from a different medium, pathway, depth band, or land use.\n"
     "Map context figures (contour areas, exceedance zones, hotspot counts) are computed by the application; report them exactly with their units.\n"
-    "Map context figures apply to the mapped analyte named in mapContext.selectedAnalyte — e.g. contourAreaM2 IS the contour area for that analyte; report it when asked about that analyte's contour or extent.\n"
+    "Map context figures apply to the mapped analyte named in mapContext.selectedAnalyte — e.g. contourAreaM2 IS the contour area for that analyte, and volumeM3/massTonnes are its estimated contaminated volume and mass; report them when asked about that analyte's contour, extent, or volume.\n"
     "Do not calculate or estimate spatial areas or distances yourself; if a spatial figure is genuinely absent from the map context, say the map does not provide it.\n"
     "If the project context does not contain the answer, say so plainly.\n"
     "Prefer short paragraphs. Avoid decorative markdown and unnecessary bullet points."
@@ -833,14 +833,80 @@ def _format_map_number(value: float | int) -> str:
     return f"{value:g}"
 
 
+def _map_criteria_clause(m) -> str:
+    if m.selectedCriteriaName and m.criteriaValue is not None:
+        return (
+            f" assessed against {m.selectedCriteriaName} at "
+            f"{_format_map_number(m.criteriaValue)}"
+        )
+    if m.selectedCriteriaName:
+        return f" assessed against {m.selectedCriteriaName}"
+    return ""
+
+
+def _map_zone_sentence(m, analyte: str) -> str | None:
+    if m.exceedanceZoneCount is None:
+        return None
+    zone_text = (
+        f"{m.exceedanceZoneCount} exceedance zone"
+        f"{'s' if m.exceedanceZoneCount != 1 else ''}"
+    )
+    if m.criticalZoneCount is not None:
+        zone_text += (
+            f" ({m.criticalZoneCount} critical)"
+            if m.criticalZoneCount
+            else " (none critical)"
+        )
+    sentence = f"The interpolated surface shows {zone_text} for {analyte}"
+    if m.concentrationPointCount is not None:
+        sentence += f" from {m.concentrationPointCount} mapped sample points"
+    return sentence + "."
+
+
+def _map_volume_sentence(m) -> str | None:
+    if m.volumeM3 is None:
+        return None
+    sentence = (
+        f"The estimated contaminated volume is about "
+        f"{_format_map_number(m.volumeM3)} m3"
+    )
+    if m.massTonnes is not None:
+        sentence += f" (roughly {_format_map_number(m.massTonnes)} t of soil)"
+    detail_bits: list[str] = []
+    if m.contaminatedAreaM2 is not None:
+        detail_bits.append(
+            f"contaminated footprint {_format_map_number(m.contaminatedAreaM2)} m2"
+        )
+    if m.averageDepthM is not None:
+        detail_bits.append(
+            f"average impacted depth {_format_map_number(m.averageDepthM)} m"
+        )
+    if m.exceedingLocations is not None and m.totalLocations is not None:
+        detail_bits.append(
+            f"{m.exceedingLocations} of {m.totalLocations} mapped locations exceeding"
+        )
+    if detail_bits:
+        sentence += f" — {', '.join(detail_bits)}"
+    sentence += "."
+    if m.volumeConfidence:
+        sentence += f" Confidence in this estimate is {m.volumeConfidence}"
+        if m.volumeDepthAssumed:
+            sentence += " (impact depth was assumed where depth data is missing)"
+        sentence += "."
+    elif m.volumeDepthAssumed:
+        sentence += " Impact depth was assumed where depth data is missing."
+    return sentence
+
+
 def _try_answer_map_spatial(question: str, ctx: WorkspaceContext) -> str | None:
     """Deterministic answers for exact map figures (PRD_101 Phase A).
 
-    App-computed spatial figures (contour area, zone counts) are answered
-    verbatim from mapContext instead of via the LLM — the grounding rules
-    make the model refuse figures that are not literally labelled for the
-    asked analyte, so exact-figure questions get the criterion-lookup
-    treatment: deterministic, or an honest 'not on the map'.
+    App-computed spatial figures (contour area, zones, contaminated volume)
+    are answered verbatim from mapContext instead of via the LLM — the
+    grounding rules make the model refuse figures that are not literally
+    labelled for the asked analyte, so exact-figure questions get the
+    criterion-lookup treatment: a composed factual summary, or an honest
+    'not on the map'. Interpretive follow-ups still go to the LLM/KB.
     """
     m = ctx.mapContext
     if not m:
@@ -857,42 +923,62 @@ def _try_answer_map_spatial(question: str, ctx: WorkspaceContext) -> str | None:
 
     asks_contour = "contour" in key or "footprint" in key
     asks_zones = "zone" in key or "hotspot" in key or "hot spot" in key
+    asks_volume = (
+        "volume" in key
+        or "tonne" in key
+        or "tonnage" in key
+        or "cubic" in key
+        or " m3" in f" {key}"
+        or "how much soil" in key
+        or "excavat" in key
+    )
+    asks_extent = (
+        "extent" in key
+        or "how big" in key
+        or "how large" in key
+        or "how extensive" in key
+        or "contaminated area" in key
+        or "impacted area" in key
+    )
 
-    if asks_contour:
+    if not (asks_contour or asks_zones or asks_volume or asks_extent):
+        return None
+
+    sentences: list[str] = []
+
+    if asks_contour or asks_extent:
         if m.contourAreaM2 is not None:
-            return (
-                f"The drawn contour area{view} is about "
-                f"{_format_map_number(m.contourAreaM2)} m2. The mapped analyte is "
-                f"{analyte}{depth}."
+            sentences.append(
+                f"The drawn contour area{view} covers about "
+                f"{_format_map_number(m.contourAreaM2)} m2 for {analyte}{depth},"
+                f"{_map_criteria_clause(m)}."
             )
-        return (
-            "The saved site map does not include a drawn contour area, "
-            "so I can't give a contour size from the map."
+        elif asks_contour:
+            sentences.append(
+                "The saved site map does not include a drawn contour area, "
+                "so I can't give a contour size from the map."
+            )
+
+    zone_sentence = _map_zone_sentence(m, analyte)
+    if zone_sentence and (asks_zones or asks_contour or asks_extent):
+        sentences.append(zone_sentence)
+
+    volume_sentence = _map_volume_sentence(m)
+    if volume_sentence and (asks_volume or asks_contour or asks_extent):
+        sentences.append(volume_sentence)
+    elif asks_volume and volume_sentence is None:
+        sentences.append(
+            "The map does not include a volume estimate yet — it needs a drawn "
+            "contour area, a mapped analyte, and an applied criterion to "
+            "calculate one."
         )
 
-    if asks_zones:
-        parts: list[str] = []
-        if m.exceedanceZoneCount is not None:
-            zone_text = (
-                f"{m.exceedanceZoneCount} exceedance zone"
-                f"{'s' if m.exceedanceZoneCount != 1 else ''}"
-            )
-            if m.criticalZoneCount is not None:
-                zone_text += (
-                    f" ({m.criticalZoneCount} critical)"
-                    if m.criticalZoneCount
-                    else " (none critical)"
-                )
-            parts.append(zone_text)
-        if m.hotspotDiameterM is not None:
-            parts.append(
-                f"hotspot zones are drawn at {_format_map_number(m.hotspotDiameterM)} m diameter"
-            )
-        if not parts:
-            return None
-        return f"The saved site map shows {' and '.join(parts)} for {analyte}{depth}."
+    if asks_zones and not zone_sentence and not sentences:
+        return None
 
-    return None
+    if not sentences:
+        return None
+    return " ".join(sentences)
 
 
 def _try_answer_project_evidence(

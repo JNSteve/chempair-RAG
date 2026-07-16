@@ -188,6 +188,15 @@ class MapContext(BaseModel):
     criticalZoneCount: Optional[int] = None
     hotspotCount: Optional[int] = None
     hotspotDiameterM: Optional[float] = None
+    # Voronoi contaminated-volume estimate (map engine, PRD_038/039)
+    volumeM3: Optional[float] = None
+    massTonnes: Optional[float] = None
+    contaminatedAreaM2: Optional[float] = None
+    averageDepthM: Optional[float] = None
+    volumeConfidence: Optional[str] = None
+    volumeDepthAssumed: Optional[bool] = None
+    exceedingLocations: Optional[int] = None
+    totalLocations: Optional[int] = None
     capturedAtIso: Optional[str] = None
 
 
@@ -537,6 +546,17 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             parts.append(f"Hotspot diameter: {m.hotspotDiameterM:g} m")
         if m.concentrationPointCount is not None:
             parts.append(f"Mapped sample points: {m.concentrationPointCount}")
+        if m.volumeM3 is not None:
+            volume = f"Estimated contaminated volume: {m.volumeM3:g} m3"
+            if m.massTonnes is not None:
+                volume += f" (~{m.massTonnes:g} t)"
+            if m.volumeConfidence:
+                volume += f", confidence {m.volumeConfidence}"
+            parts.append(volume)
+        if m.contaminatedAreaM2 is not None:
+            parts.append(f"Contaminated area: {m.contaminatedAreaM2:g} m2")
+        if m.averageDepthM is not None:
+            parts.append(f"Average contaminated depth: {m.averageDepthM:g} m")
         if parts:
             sections.append("## Map Context\n" + "\n".join(parts))
 
