@@ -1,5 +1,14 @@
 # Context Bot — Architecture Spec
 
+> **STATUS: RETIRED FROM RUNTIME (2026-07).** The `/query` endpoint no
+> longer routes questions or answers from deterministic templates. Every
+> context-bearing question now takes the unified grounded answer path
+> (`UNIFIED_ANSWER_SYSTEM` in `server.py`): one knowledge-base retrieval
+> pass plus one LLM call that reasons over the site data and the retrieved
+> evidence together, with strict grounding rules instead of routing.
+> This spec is retained to document the legacy routing code that still
+> exists in `server.py`/`query_routing.py` until it is deleted.
+
 > This doc defines the classification, handoff, and isolation rules for the Context Bot.
 > It is the single source of truth for any agent (Claude Code, Codex, or human) implementing or modifying the Context Bot or its integration with the RAG AI.
 
