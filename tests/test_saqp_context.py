@@ -168,3 +168,36 @@ def test_deterministic_saqp_answer_skips_without_context():
         {"schemaVersion": 4, "projectState": {"project": {"projectName": "Ducat"}}}
     )
     assert server._try_answer_saqp("have i planned enough samples?", ctx) is None
+
+
+def test_advice_questions_fall_through_to_llm():
+    # "where should I add more samples?" is advice, not a figure lookup —
+    # the template must not re-fire with the same sufficiency answer.
+    assert (
+        server._try_answer_saqp(
+            "OK where should I add more samples to? what part of the site", _ctx()
+        )
+        is None
+    )
+    assert (
+        server._try_answer_saqp("how should i improve my sampling plan?", _ctx())
+        is None
+    )
+    # Plain sufficiency asks still answer deterministically.
+    assert server._try_answer_saqp("have i planned enough samples?", _ctx()) is not None
+
+
+def test_map_advice_questions_fall_through_to_llm():
+    from context_models import WorkspaceContext as WC
+
+    ctx = WC.model_validate(
+        {
+            "schemaVersion": 5,
+            "projectState": {"project": {"projectName": "Ducat"}},
+            "mapContext": {"exceedanceZoneCount": 3, "criticalZoneCount": 1},
+        }
+    )
+    assert (
+        server._try_answer_map_spatial("where are the hotspot zones on the map?", ctx)
+        is None
+    )

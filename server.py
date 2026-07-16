@@ -164,6 +164,7 @@ PROJECT_ONLY_ANSWER_SYSTEM = (
     "Map context figures apply to the mapped analyte named in mapContext.selectedAnalyte — e.g. contourAreaM2 IS the contour area for that analyte, and volumeM3/massTonnes are its estimated contaminated volume and mass; report them when asked about that analyte's contour, extent, or volume.\n"
     "Do not calculate or estimate spatial areas or distances yourself; if a spatial figure is genuinely absent from the map context, say the map does not provide it.\n"
     "saqpContext figures (planned/required points, area, grid spacing, sufficiency status) come from the application's sampling-plan sufficiency engine; treat them as authoritative and never re-derive sampling requirements yourself.\n"
+    "For advice questions (e.g. where to add sampling points), reason from the supplied plan and map figures — the shortfall between planned and required points, zones, and contour — and recommend the app's SAQP grid and coverage tools; point locations and coordinates are not in the context, so never invent them.\n"
     "If the project context does not contain the answer, say so plainly.\n"
     "Prefer short paragraphs. Avoid decorative markdown and unnecessary bullet points."
 )
@@ -922,6 +923,12 @@ def _try_answer_map_spatial(question: str, ctx: WorkspaceContext) -> str | None:
     )
     depth = f" over the {m.depthFilter} depth interval" if m.depthFilter else ""
 
+    # Advice/location questions are not figure lookups — the LLM answers
+    # them with the map figures in context (and honestly notes that point
+    # locations are not part of the chat context).
+    if any(term in key for term in SAQP_ADVICE_TERMS):
+        return None
+
     asks_contour = "contour" in key or "footprint" in key
     asks_zones = "zone" in key or "hotspot" in key or "hot spot" in key
     asks_volume = (
@@ -1011,15 +1018,40 @@ _SUFFICIENCY_VERDICTS = {
 }
 
 
+SAQP_ADVICE_TERMS = (
+    "where",
+    "what part",
+    "which part",
+    "which area",
+    "what area",
+    "how should",
+    "how do i",
+    "how can i",
+    "recommend",
+    "suggest",
+    "advice",
+    "prioritise",
+    "prioritize",
+    "why",
+)
+
+
 def _try_answer_saqp(question: str, ctx: WorkspaceContext) -> str | None:
     """Deterministic answer for sampling-plan sufficiency questions
-    (PRD_101 Phase B) — the app's advisory verbatim, never a model guess."""
+    (PRD_101 Phase B) — the app's advisory verbatim, never a model guess.
+
+    Advice-seeking questions ("where should I add more samples?") are NOT
+    figure lookups — they fall through to the LLM, which receives the plan
+    and map figures in its context and can actually reason about them.
+    """
     s = ctx.saqpContext
     if not s:
         return None
 
     key = _normalise_text(question)
     if not any(term in key for term in SAQP_QUESTION_TERMS):
+        return None
+    if any(term in key for term in SAQP_ADVICE_TERMS):
         return None
 
     status = s.computedStatus or s.sufficiencyStatus
