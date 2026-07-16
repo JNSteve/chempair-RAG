@@ -172,6 +172,26 @@ DOCUMENT_SCOPE_PATTERNS = (
 )
 
 
+SPATIAL_EXTENT_PATTERNS = (
+    "contour",
+    "hotspot",
+    "hot spot",
+    "exceedance zone",
+    "contaminated area",
+    "contamination area",
+    "impacted area",
+    "impact area",
+    "how big",
+    "how large",
+    "how extensive",
+    "extent of",
+    "spatial extent",
+    "footprint",
+    "contained within",
+    "site boundary",
+)
+
+
 @dataclass
 class RouteGuardrails:
     route_hint: str | None = None
@@ -185,6 +205,10 @@ def _has_explicit_regulatory_override(question_key: str) -> bool:
 
 def _has_explicit_project_scope(question_key: str) -> bool:
     return any(term in question_key for term in PROJECT_ONLY_SCOPE_TERMS)
+
+
+def is_spatial_extent_question(question_key: str) -> bool:
+    return any(pattern in question_key for pattern in SPATIAL_EXTENT_PATTERNS)
 
 
 def _has_regulatory_framing(question_key: str) -> bool:
@@ -440,6 +464,21 @@ def deterministic_route_guardrails(
             route_hint="regulatory_only",
             project_only_allowed=False,
             reason="explicit_regulatory_override",
+        )
+
+    if ctx.mapContext and is_spatial_extent_question(question_key):
+        # Spatial figures (contour areas, zones, hotspots) are app-computed
+        # project evidence; regulatory framing still earns KB support.
+        if has_regulatory_framing:
+            return RouteGuardrails(
+                route_hint="hybrid",
+                project_only_allowed=False,
+                reason="map_spatial_evidence_with_regulatory_support",
+            )
+        return RouteGuardrails(
+            route_hint="project_only",
+            project_only_allowed=True,
+            reason="map_spatial_evidence",
         )
 
     if is_contaminants_of_concern_question(question_key) and usable_project_evidence:

@@ -166,6 +166,31 @@ class FieldSummary(BaseModel):
     hasGpsData: Optional[bool] = None
 
 
+class MapContext(BaseModel):
+    """Summary of the active/saved site-map view (schema v5, optional).
+
+    Numbers only — the frontend sends app-computed figures (contour areas,
+    zone counts), never polygon coordinate dumps or imagery. Alfie reports
+    these verbatim; it must not derive spatial figures itself.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    mapViewName: Optional[str] = None
+    selectedAnalyte: Optional[str] = None
+    selectedCriteriaName: Optional[str] = None
+    criteriaValue: Optional[float | int] = None
+    criteriaUnit: Optional[str] = None
+    depthFilter: Optional[str] = None
+    concentrationPointCount: Optional[int] = None
+    contourAreaM2: Optional[float] = None
+    exceedanceZoneCount: Optional[int] = None
+    criticalZoneCount: Optional[int] = None
+    hotspotCount: Optional[int] = None
+    hotspotDiameterM: Optional[float] = None
+    capturedAtIso: Optional[str] = None
+
+
 class ProjectState(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -226,6 +251,7 @@ class WorkspaceContext(BaseModel):
     projectEvidenceSummary: Optional[ProjectEvidenceSummary] = None
     projectState: Optional[ProjectState] = None
     retrievalContext: Optional[RetrievalContext] = None
+    mapContext: Optional[MapContext] = None
     conversation: Optional[List[ConversationMessage]] = Field(
         default=None, max_length=MAX_CONVERSATION_MESSAGES
     )
@@ -484,6 +510,35 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             parts.append(f"GPS data: {'Yes' if f.hasGpsData else 'No'}")
         if parts:
             sections.append("## Field Summary\n" + "\n".join(parts))
+
+    if ctx.mapContext:
+        m = ctx.mapContext
+        parts = []
+        if m.mapViewName:
+            parts.append(f"Map view: {m.mapViewName}")
+        if m.selectedAnalyte:
+            parts.append(f"Mapped analyte: {m.selectedAnalyte}")
+        if m.selectedCriteriaName:
+            criteria = f"Map criteria: {m.selectedCriteriaName}"
+            if m.criteriaValue is not None:
+                criteria += f" ({m.criteriaValue}{' ' + m.criteriaUnit if m.criteriaUnit else ''})"
+            parts.append(criteria)
+        if m.depthFilter:
+            parts.append(f"Depth filter: {m.depthFilter}")
+        if m.contourAreaM2 is not None:
+            parts.append(f"Contour area: {m.contourAreaM2:g} m2")
+        if m.exceedanceZoneCount is not None:
+            parts.append(f"Exceedance zones: {m.exceedanceZoneCount}")
+        if m.criticalZoneCount is not None:
+            parts.append(f"Critical zones: {m.criticalZoneCount}")
+        if m.hotspotCount is not None:
+            parts.append(f"Hotspots: {m.hotspotCount}")
+        if m.hotspotDiameterM is not None:
+            parts.append(f"Hotspot diameter: {m.hotspotDiameterM:g} m")
+        if m.concentrationPointCount is not None:
+            parts.append(f"Mapped sample points: {m.concentrationPointCount}")
+        if parts:
+            sections.append("## Map Context\n" + "\n".join(parts))
 
     if retrieval_context:
         parts = []

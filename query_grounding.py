@@ -236,6 +236,10 @@ def build_grounded_context(
         snapshot["targetAnalytes"] = ctx.targetAnalytes
     if ctx.targetSampleCodes:
         snapshot["targetSampleCodes"] = ctx.targetSampleCodes
+    if ctx.mapContext:
+        # Small, app-computed spatial summary — always passed through when
+        # present so spatial questions answer from map evidence.
+        snapshot["mapContext"] = ctx.mapContext.model_dump(exclude_none=True)
 
     matched_analyte_keys = {
         normalise_text(analyte) for analyte in grounded.matched_analytes
