@@ -163,6 +163,7 @@ PROJECT_ONLY_ANSWER_SYSTEM = (
     "Map context figures (contour areas, exceedance zones, hotspot counts) are computed by the application; report them exactly with their units.\n"
     "Map context figures apply to the mapped analyte named in mapContext.selectedAnalyte — e.g. contourAreaM2 IS the contour area for that analyte, and volumeM3/massTonnes are its estimated contaminated volume and mass; report them when asked about that analyte's contour, extent, or volume.\n"
     "Do not calculate or estimate spatial areas or distances yourself; if a spatial figure is genuinely absent from the map context, say the map does not provide it.\n"
+    "saqpContext figures (planned/required points, area, grid spacing, sufficiency status) come from the application's sampling-plan sufficiency engine; treat them as authoritative and never re-derive sampling requirements yourself.\n"
     "If the project context does not contain the answer, say so plainly.\n"
     "Prefer short paragraphs. Avoid decorative markdown and unnecessary bullet points."
 )
@@ -975,6 +976,99 @@ def _try_answer_map_spatial(question: str, ctx: WorkspaceContext) -> str | None:
 
     if asks_zones and not zone_sentence and not sentences:
         return None
+
+    if not sentences:
+        return None
+    return " ".join(sentences)
+
+
+SAQP_QUESTION_TERMS = (
+    "saqp",
+    "sampling plan",
+    "sample plan",
+    "sampling design",
+    "enough sample",
+    "sufficient sample",
+    "sample density",
+    "sampling density",
+    "sample spacing",
+    "grid spacing",
+    "planned sample",
+    "planned point",
+    "planned enough",
+    "more samples",
+    "additional samples",
+)
+
+_SUFFICIENCY_VERDICTS = {
+    "sufficient": "Yes — the sampling plan meets the active guidance thresholds.",
+    "borderline": (
+        "It is close to the line — the plan sits near the guidance "
+        "thresholds and is worth reviewing before field execution."
+    ),
+    "insufficient": "Not yet — the plan falls short of the active guidance.",
+    "not_assessable": "The sampling plan cannot be assessed for sufficiency yet.",
+}
+
+
+def _try_answer_saqp(question: str, ctx: WorkspaceContext) -> str | None:
+    """Deterministic answer for sampling-plan sufficiency questions
+    (PRD_101 Phase B) — the app's advisory verbatim, never a model guess."""
+    s = ctx.saqpContext
+    if not s:
+        return None
+
+    key = _normalise_text(question)
+    if not any(term in key for term in SAQP_QUESTION_TERMS):
+        return None
+
+    status = s.computedStatus or s.sufficiencyStatus
+    sentences: list[str] = []
+
+    if s.sufficiencyStatus == "override" and s.computedStatus:
+        computed = _SUFFICIENCY_VERDICTS.get(s.computedStatus, "")
+        override_line = "A manual override is active on the sampling plan"
+        if s.overrideJustification:
+            override_line += f' ("{s.overrideJustification}")'
+        if computed:
+            override_line += f". The computed assessment was: {computed}"
+        else:
+            override_line += "."
+        sentences.append(override_line)
+    else:
+        verdict = _SUFFICIENCY_VERDICTS.get(status or "")
+        if verdict:
+            sentences.append(verdict)
+
+    if s.plannedPoints is not None:
+        detail = f"The plan has {s.plannedPoints} planned sampling points"
+        if s.requiredPoints is not None:
+            detail += f" against a guidance minimum of {s.requiredPoints}"
+        if s.areaHa is not None:
+            detail += f" for a {s.areaHa:g} ha assessment area"
+        if s.gridSizeM is not None:
+            detail += f", on a {s.gridSizeM:g} m grid"
+        sentences.append(detail + ".")
+
+    if status == "not_assessable" and s.advisoryMessage:
+        sentences.append(s.advisoryMessage)
+
+    if s.rulesetKey:
+        ruleset = f"Assessed under ruleset {s.rulesetKey}"
+        if s.rulesetVersion:
+            ruleset += f" v{s.rulesetVersion}"
+        sentences.append(ruleset + ".")
+
+    if s.completedPoints:
+        progress = f"Field progress so far: {s.completedPoints} points completed"
+        extras = []
+        if s.skippedPoints:
+            extras.append(f"{s.skippedPoints} skipped")
+        if s.relocatedPoints:
+            extras.append(f"{s.relocatedPoints} relocated")
+        if extras:
+            progress += f" ({', '.join(extras)})"
+        sentences.append(progress + ".")
 
     if not sentences:
         return None
@@ -1938,12 +2032,22 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
             debug.used_project_fields = handoff.used_project_fields
 
             if route_used == "project_only" and result is None:
+                # Sampling-plan sufficiency answers deterministically from
+                # the app's advisory (PRD_101 Phase B).
+                saqp_answer = _try_answer_saqp(effective_question, req.context)
+                if saqp_answer:
+                    result = saqp_answer
+                    debug.used_project_fields = ["saqpContext"]
                 # Exact map figures answer deterministically and take
                 # precedence — "how many zones on the map" must not fall
                 # into the exceedance-evidence template below.
-                map_answer = _try_answer_map_spatial(
-                    effective_question,
-                    req.context,
+                map_answer = (
+                    None
+                    if result is not None
+                    else _try_answer_map_spatial(
+                        effective_question,
+                        req.context,
+                    )
                 )
                 if map_answer:
                     result = map_answer

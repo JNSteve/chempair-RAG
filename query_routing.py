@@ -172,6 +172,27 @@ DOCUMENT_SCOPE_PATTERNS = (
 )
 
 
+SAQP_PLAN_PATTERNS = (
+    "saqp",
+    "sampling plan",
+    "sample plan",
+    "sampling design",
+    "sampling and analysis",
+    "enough samples",
+    "enough sample points",
+    "sufficient samples",
+    "sample density",
+    "sampling density",
+    "sample spacing",
+    "grid spacing",
+    "planned samples",
+    "planned points",
+    "planned enough",
+    "more samples",
+    "additional samples",
+)
+
+
 SPATIAL_EXTENT_PATTERNS = (
     "contour",
     "hotspot",
@@ -209,6 +230,10 @@ def _has_explicit_project_scope(question_key: str) -> bool:
 
 def is_spatial_extent_question(question_key: str) -> bool:
     return any(pattern in question_key for pattern in SPATIAL_EXTENT_PATTERNS)
+
+
+def is_saqp_plan_question(question_key: str) -> bool:
+    return any(pattern in question_key for pattern in SAQP_PLAN_PATTERNS)
 
 
 def _has_regulatory_framing(question_key: str) -> bool:
@@ -464,6 +489,22 @@ def deterministic_route_guardrails(
             route_hint="regulatory_only",
             project_only_allowed=False,
             reason="explicit_regulatory_override",
+        )
+
+    if ctx.saqpContext and is_saqp_plan_question(question_key):
+        # Sampling-plan sufficiency is app-computed project evidence; the
+        # underlying guidance documents still earn KB support when the
+        # question has regulatory framing.
+        if has_regulatory_framing:
+            return RouteGuardrails(
+                route_hint="hybrid",
+                project_only_allowed=False,
+                reason="saqp_plan_evidence_with_regulatory_support",
+            )
+        return RouteGuardrails(
+            route_hint="project_only",
+            project_only_allowed=True,
+            reason="saqp_plan_evidence",
         )
 
     if ctx.mapContext and is_spatial_extent_question(question_key):

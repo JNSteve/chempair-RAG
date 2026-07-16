@@ -460,3 +460,24 @@ questions:
       route_used: [project_only]
       must_not_include: ["metres from the boundary"]
       max_citations: 0
+
+  # --- saqp: sampling-plan sufficiency via schema v5 saqpContext ---
+  # (PRD_101 Phase B; severity info until validated against a live backend)
+  - id: saqp_enough_samples
+    category: saqp
+    question: "have i planned enough samples?"
+    profile: ducat_soil_saqp
+    severity: info
+    expect:
+      route_used: [project_only]
+      must_include: ["8", "9", "close to the line"]
+      max_citations: 0
+
+  - id: saqp_density_regulatory
+    category: saqp
+    question: "is my sampling density adequate under the NEPM guidance?"
+    profile: ducat_soil_saqp
+    severity: info
+    expect:
+      route_used: [hybrid]
+      must_include: ["8"]
