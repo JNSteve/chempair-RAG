@@ -1990,7 +1990,7 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
         if _has_usable_context(req.context):
             context_used = True
             logger.info(
-                "context_accepted schema_version=%s client_rev=%s project=%s session=%s map_keys=%s",
+                "context_accepted schema_version=%s client_rev=%s project=%s session=%s map_keys=%s saqp_keys=%s",
                 req.context.schemaVersion,
                 # Client build marker (extra field, absent from old bundles) —
                 # proves which frontend build produced this request.
@@ -2003,6 +2003,9 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
                 # the client actually sent, e.g. whether contourAreaM2 arrived.
                 ",".join(sorted(req.context.mapContext.model_dump(exclude_none=True)))
                 if req.context.mapContext
+                else None,
+                ",".join(sorted(req.context.saqpContext.model_dump(exclude_none=True)))
+                if req.context.saqpContext
                 else None,
             )
         else:
