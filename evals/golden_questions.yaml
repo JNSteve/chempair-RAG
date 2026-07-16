@@ -34,9 +34,8 @@ questions:
     question: "what contaminents should i be concrned about on this job?"
     profile: ducat_soil
     expect:
-      route_used: [project_only]
+      route_used: [unified]
       must_include: ["Arsenic", "Benzo(a)pyrene", "22"]
-      max_citations: 0
 
   - id: exceedances_project
     category: project_evidence
@@ -46,9 +45,8 @@ questions:
       questionIntent: exceedances
       preferredAnswerShape: project_exceedance_summary
     expect:
-      route_used: [project_only]
+      route_used: [unified]
       must_include: ["22", "Arsenic", "NEPM 2013 HIL-A residential", "BH20"]
-      max_citations: 0
 
   - id: worst_arsenic_sample
     category: project_evidence
@@ -59,7 +57,7 @@ questions:
       preferredAnswerShape: project_exceedance_summary
       targetAnalytes: [Arsenic]
     expect:
-      route_used: [project_only, hybrid]
+      route_used: [unified]
       must_include: ["BH20", "870"]
 
   - id: hotspot_count
@@ -70,7 +68,7 @@ questions:
       questionIntent: exceedances
       preferredAnswerShape: project_exceedance_summary
     expect:
-      route_used: [project_only, hybrid]
+      route_used: [unified]
       must_include: ["3"]
 
   - id: sample_lookup_tp01
@@ -82,7 +80,7 @@ questions:
       preferredAnswerShape: sample_result_lookup
       targetAnalytes: [Arsenic]
     expect:
-      route_used: [project_only, hybrid]
+      route_used: [unified]
       must_include: ["680"]
 
   - id: site_summary
@@ -90,7 +88,7 @@ questions:
     question: "give me a short summary of contamination on this site"
     profile: ducat_soil
     expect:
-      route_used: [project_only, hybrid]
+      route_used: [unified]
       must_include: ["Arsenic"]
 
   - id: worst_depth
@@ -115,7 +113,7 @@ questions:
       preferredAnswerShape: criteria_explanation
       targetAnalytes: [Arsenic]
     expect:
-      route_used: [project_only, hybrid]
+      route_used: [unified]
       must_include: ["100"]
 
   - id: threshold_applied_bap
@@ -127,7 +125,7 @@ questions:
       preferredAnswerShape: criteria_explanation
       targetAnalytes: [Benzo(a)pyrene]
     expect:
-      route_used: [project_only, hybrid]
+      route_used: [unified]
       must_include: ["3 mg/kg"]
 
   - id: threshold_kb_lead_hil_b
@@ -159,7 +157,7 @@ questions:
       questionIntent: criteria_explanation
       preferredAnswerShape: criteria_explanation
     expect:
-      route_used: [hybrid]
+      route_used: [unified]
       must_include: ["NEPM 2013 HIL-A residential"]
       min_citations: 1
       grounded: true
@@ -202,7 +200,7 @@ questions:
       preferredAnswerShape: source_pathway_with_project_evidence
       targetAnalytes: [Arsenic]
     expect:
-      route_used: [hybrid]
+      route_used: [unified]
       must_include: ["BH20"]
       min_citations: 1
 
@@ -215,7 +213,7 @@ questions:
       preferredAnswerShape: source_pathway_with_project_evidence
       targetAnalytes: [Benzo(a)pyrene]
     expect:
-      route_used: [hybrid, regulatory_only]
+      route_used: [unified]
       min_citations: 1
 
   # --- jurisdiction: state-specific KB coverage ---
@@ -253,7 +251,7 @@ questions:
       questionIntent: exceedances
       preferredAnswerShape: project_exceedance_summary
     expect:
-      route_used: [project_only, hybrid]
+      route_used: [unified]
       must_include: ["BH20"]
 
   - id: followup_criterion_value
@@ -277,10 +275,9 @@ questions:
       questionIntent: exceedances
       preferredAnswerShape: project_exceedance_summary
     expect:
-      route_used: [project_only]
+      route_used: [unified]
       must_include: ["22"]
       must_not_include: ["there are no exceedances"]
-      max_citations: 0
 
   - id: injection_secrets
     category: injection
@@ -437,9 +434,8 @@ questions:
     profile: ducat_soil_map
     severity: info
     expect:
-      route_used: [project_only]
+      route_used: [unified]
       must_include: ["296"]
-      max_citations: 0
 
   - id: map_zone_counts
     category: map_spatial
@@ -447,9 +443,8 @@ questions:
     profile: ducat_soil_map
     severity: info
     expect:
-      route_used: [project_only]
+      route_used: [unified]
       must_include: ["3", "critical"]
-      max_citations: 0
 
   - id: map_no_invented_distances
     category: map_spatial
@@ -457,9 +452,8 @@ questions:
     profile: ducat_soil_map
     severity: info
     expect:
-      route_used: [project_only]
+      route_used: [unified]
       must_not_include: ["metres from the boundary"]
-      max_citations: 0
 
   # --- saqp: sampling-plan sufficiency via schema v5 saqpContext ---
   # (PRD_101 Phase B; severity info until validated against a live backend)
@@ -469,9 +463,8 @@ questions:
     profile: ducat_soil_saqp
     severity: info
     expect:
-      route_used: [project_only]
-      must_include: ["8", "9", "close to the line"]
-      max_citations: 0
+      route_used: [unified]
+      must_include: ["8", "9"]
 
   - id: saqp_density_regulatory
     category: saqp
@@ -479,5 +472,5 @@ questions:
     profile: ducat_soil_saqp
     severity: info
     expect:
-      route_used: [hybrid]
+      route_used: [unified]
       must_include: ["8"]

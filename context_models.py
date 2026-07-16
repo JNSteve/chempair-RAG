@@ -631,6 +631,25 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             )
         if retrieval_context.retrievedRows:
             parts.append(f"Retrieved rows: {len(retrieval_context.retrievedRows)}")
+            # Question-matched sample rows are the most relevant lab evidence —
+            # render their values, not just the count.
+            for row in retrieval_context.retrievedRows[:30]:
+                if not row.sampleCode:
+                    continue
+                header = row.sampleCode
+                if row.depth:
+                    header += f" ({row.depth})"
+                vals = []
+                for analyte_value in (row.analyteValues or [])[:20]:
+                    if analyte_value.analyte and analyte_value.value is not None:
+                        vals.append(
+                            f"{analyte_value.analyte}={analyte_value.value}"
+                            f"{' ' + analyte_value.unit if analyte_value.unit else ''}"
+                        )
+                line = f"- {header}"
+                if vals:
+                    line += ": " + ", ".join(vals)
+                parts.append(line)
         if parts:
             sections.append("## Retrieval Context\n" + "\n".join(parts))
 
