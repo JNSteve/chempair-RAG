@@ -709,9 +709,8 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                     )
                     if bit
                 ]
-                line = (
-                    f"  {interval.depthFromM:g}-{interval.depthToM:g} m: "
-                    + (", ".join(bits) if bits else "no description")
+                line = f"  {interval.depthFromM:g}-{interval.depthToM:g} m: " + (
+                    ", ".join(bits) if bits else "no description"
                 )
                 if interval.observations:
                     line += f" — {interval.observations}"
@@ -727,9 +726,7 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                         depth += f"-{sample.depthToM:g}"
                     bits.append(f"@ {depth} m")
                 if sample.pidReading is not None:
-                    bits.append(
-                        f"PID {sample.pidReading:g} {sample.pidUnit or 'ppm'}"
-                    )
+                    bits.append(f"PID {sample.pidReading:g} {sample.pidUnit or 'ppm'}")
                 if sample.odour:
                     bits.append(f"odour: {sample.odour}")
                 if sample.observations:
@@ -737,13 +734,10 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                 if not bits and not sample.sampleId:
                     continue
                 parts.append(
-                    f"  sample {sample.sampleId or '(unlabelled)'} "
-                    + " ".join(bits)
+                    f"  sample {sample.sampleId or '(unlabelled)'} " + " ".join(bits)
                 )
         if f.truncated:
-            parts.append(
-                "(borehole list truncated — not all field data is shown)"
-            )
+            parts.append("(borehole list truncated — not all field data is shown)")
         if parts:
             sections.append("## Borehole Logs & Field Data\n" + "\n".join(parts))
 
