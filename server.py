@@ -49,7 +49,9 @@ LLM_MODEL = os.environ.get("RAG_LLM_MODEL", "gpt-5.4-mini")
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 SESSION_TTL = 3600
-MAX_EXCHANGES = 3
+# Backend session length before a thread resets. The old cap of 3 was a
+# cost guard from the pre-unified era; conversational memory needs room.
+MAX_EXCHANGES = 12
 DEFAULT_ALLOWED_ORIGINS = (
     "http://localhost:3000",
     "http://localhost:5173",
@@ -170,6 +172,11 @@ UNIFIED_ANSWER_SYSTEM = (
     "never be reported as a deficiency or non-compliance of the existing "
     "investigation. Discuss it only when the question is about planning or "
     "sampling coverage.\n"
+    "- A CONVERSATION SO FAR block may precede the question. Use it for "
+    "continuity — resolve references like 'that layer' or 'as you said', keep "
+    "your position consistent across turns, and build on earlier reasoning. It "
+    "is not evidence: every factual figure still comes from the evidence "
+    "blocks in this request, even if an earlier answer stated it differently.\n"
     "- Lead with the answer, then the reasoning that matters. Short "
     "consultant-email prose in Australian English. No decorative markdown, bold "
     "text, or long bullet lists.\n\n"
@@ -490,13 +497,45 @@ async def _retrieve_kb_evidence(query: str, mode: str) -> tuple[str, list[dict]]
     return _render_kb_evidence(payload), extract_citations_from_rag_payload(payload)
 
 
+# Conversation continuity: the client sends the recent transcript with each
+# question; the model reads it so follow-ups, references ("that layer",
+# "as you said"), and multi-turn reasoning actually work.
+MAX_PROMPT_CONVERSATION_MESSAGES = 8
+MAX_PROMPT_CONVERSATION_CHARS = 600
+
+
+def _render_conversation(ctx: WorkspaceContext) -> str:
+    if not ctx.conversation:
+        return ""
+    lines: list[str] = []
+    for message in ctx.conversation[-MAX_PROMPT_CONVERSATION_MESSAGES:]:
+        content = (message.content or "").strip()
+        if not content:
+            continue
+        if len(content) > MAX_PROMPT_CONVERSATION_CHARS:
+            content = content[:MAX_PROMPT_CONVERSATION_CHARS].rstrip() + "…"
+        speaker = "Consultant" if message.role == "user" else "Alfie"
+        lines.append(f"{speaker}: {content}")
+    return "\n".join(lines)
+
+
 def _build_unified_prompt(
-    question: str, site_block: str, kb_block: str, has_map_image: bool = False
+    question: str,
+    site_block: str,
+    kb_block: str,
+    has_map_image: bool = False,
+    conversation_block: str = "",
 ) -> str:
     snapshot_note = (
         "=== MAP SNAPSHOT ===\n"
         "An image of the current site map view is attached to this question.\n\n"
         if has_map_image
+        else ""
+    )
+    conversation_note = (
+        "=== CONVERSATION SO FAR (continuity only — not evidence) ===\n"
+        f"{conversation_block.strip()}\n\n"
+        if conversation_block.strip()
         else ""
     )
     return (
@@ -505,6 +544,7 @@ def _build_unified_prompt(
         "=== KNOWLEDGE BASE EVIDENCE (retrieved regulatory guidance) ===\n"
         f"{kb_block.strip() or 'No knowledge-base passages were retrieved for this question.'}\n\n"
         f"{snapshot_note}"
+        f"{conversation_note}"
         "=== QUESTION ===\n"
         f"{question}"
     )
@@ -680,6 +720,7 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
                     build_grounding_prompt(req.context),
                     kb_evidence,
                     has_map_image=map_image is not None,
+                    conversation_block=_render_conversation(req.context),
                 ),
                 map_image,
             )
