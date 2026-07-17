@@ -474,3 +474,85 @@ questions:
     expect:
       route_used: [unified]
       must_include: ["8"]
+
+  # --- KB v2.1 coverage: new documents ingested July 2026 ---
+  # (severity info — these need the v2.1 KB release live before they pass)
+  - id: v21_anzg_dgv_lookup
+    category: threshold_lookup
+    question: "what is the ANZG default guideline value for zinc in freshwater at 95% species protection?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)toxicants-dgvs-mastertable"
+
+  - id: v21_qld_clid_content
+    category: practice_guidance
+    question: "what content must a contaminated land investigation document include in Queensland?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)queensland.?auditor.?handbook|auditor-handbook"
+
+  - id: v21_qld_sqp_requirements
+    category: practice_guidance
+    question: "what qualifications and experience does a suitably qualified person need for contaminated land work in Queensland?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)sqp-guideline|suitably"
+
+  - id: v21_hsl_soil_texture
+    category: practice_guidance
+    question: "how do I choose the correct soil texture category when applying the petroleum HSLs?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)crc.?care"
+
+  - id: v21_adwg_manganese
+    category: threshold_lookup
+    question: "what is the Australian drinking water guideline value for manganese?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)drinking-water-guidelines"
+
+  - id: v21_ass_field_screening
+    category: practice_guidance
+    question: "how do I field screen for acid sulfate soils during an investigation?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)sampling-identification"
+
+  - id: v21_nsw_auditor_duties
+    category: practice_guidance
+    question: "what are the duties of an accredited site auditor under the NSW scheme?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)17p0269|site-auditor-scheme"
+
+  - id: v21_nsw_emp_content
+    category: practice_guidance
+    question: "what should an environmental management plan for contaminated land contain in NSW?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)20p2675|22p3473|environmental-management"

@@ -36,15 +36,22 @@ MANIFEST_PATH = Path(__file__).resolve().parent / "corpus" / "manifest.yaml"
 # should still show the real document name via its filename).
 _manifest_titles: dict[str, str] | None = None
 _manifest_titles_by_filename: dict[str, str] | None = None
+# doc_id/filename -> {"status": ..., "superseded_by": doc_id} so evidence and
+# citations can carry a supersession warning (manifest status: superseded).
+_manifest_meta: dict[str, dict] | None = None
+_manifest_meta_by_filename: dict[str, dict] | None = None
 
 
 def _load_manifest_indexes() -> tuple[dict[str, str], dict[str, str]]:
     """(doc_id -> title, filename -> title) from the corpus manifest; empty
     (and harmless) when the manifest is absent, empty, or unreadable."""
     global _manifest_titles, _manifest_titles_by_filename
+    global _manifest_meta, _manifest_meta_by_filename
     if _manifest_titles is None or _manifest_titles_by_filename is None:
         by_doc_id: dict[str, str] = {}
         by_filename: dict[str, str] = {}
+        meta_by_doc_id: dict[str, dict] = {}
+        meta_by_filename: dict[str, dict] = {}
         try:
             import yaml
 
@@ -53,15 +60,46 @@ def _load_manifest_indexes() -> tuple[dict[str, str], dict[str, str]]:
                 if not isinstance(doc, dict) or not doc.get("title"):
                     continue
                 title = str(doc["title"])
+                meta = {
+                    "status": str(doc.get("status") or "current"),
+                    "superseded_by": doc.get("superseded_by"),
+                }
                 if doc.get("doc_id"):
                     by_doc_id[str(doc["doc_id"])] = title
+                    meta_by_doc_id[str(doc["doc_id"])] = meta
                 if doc.get("filename"):
                     by_filename[str(doc["filename"])] = title
+                    meta_by_filename[str(doc["filename"])] = meta
         except Exception:
             pass
         _manifest_titles = by_doc_id
         _manifest_titles_by_filename = by_filename
+        _manifest_meta = meta_by_doc_id
+        _manifest_meta_by_filename = meta_by_filename
     return _manifest_titles, _manifest_titles_by_filename
+
+
+def manifest_supersession_note(doc_id: str | None, filename: str | None) -> str | None:
+    """Human-readable warning when a document is marked superseded in the
+    manifest ('superseded by <title>' when the replacement is registered),
+    else None."""
+    _load_manifest_indexes()
+    meta = None
+    if doc_id and _manifest_meta and doc_id in _manifest_meta:
+        meta = _manifest_meta[doc_id]
+    elif filename and _manifest_meta_by_filename:
+        meta = _manifest_meta_by_filename.get(filename)
+    if not meta or meta.get("status") != "superseded":
+        return None
+    replacement_id = meta.get("superseded_by")
+    replacement_title = (
+        _manifest_titles.get(str(replacement_id))
+        if replacement_id and _manifest_titles
+        else None
+    )
+    if replacement_title:
+        return f"superseded by {replacement_title}"
+    return "superseded"
 
 
 def _load_manifest_titles() -> dict[str, str]:
@@ -227,6 +265,7 @@ def extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
             source = marker["filename"]
             locator = _marker_locator(marker)
             title = _manifest_title(marker["doc_id"], source) or _citation_title(source)
+            supersession = manifest_supersession_note(marker["doc_id"], source)
         else:
             source = _file_source_name(file_path, reference_id)
             locator = _citation_locator(
@@ -238,6 +277,12 @@ def extract_citations_from_rag_payload(payload: dict | None) -> list[dict]:
             # Marker-less chunks (page continuations) still resolve their
             # real title from the manifest via filename.
             title = _manifest_title(None, source) or _citation_title(source)
+            supersession = manifest_supersession_note(None, source)
+
+        if supersession:
+            # The user-facing citation must never present a superseded
+            # document as a current source.
+            title = f"{title} ({supersession})"
 
         location = (source, locator)
         if location in seen_locations:
