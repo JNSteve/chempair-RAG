@@ -160,6 +160,83 @@ def test_legacy_chunk_without_signals_falls_back_to_source_passage():
     assert ce.extract_citations_from_rag_payload(payload) == []
 
 
+def test_hex_chunk_hash_never_becomes_a_page_number():
+    # Regression: "p" + digits inside LightRAG's hex chunk hashes used to be
+    # read as a page ("chunk-9d4ap3915bc" -> "p. 3915") and composed into a
+    # confident-looking wrong locator.
+    payload = _payload(
+        [
+            {
+                "reference_id": "ref-1",
+                "file_path": "/kb/nsw-2022-sampling-design-part1.pdf",
+                "chunk_id": "chunk-9d4ap3915bc",
+                "content": (
+                    "Table 9 sets out sampling density considerations for "
+                    "systematic designs across assessment areas."
+                ),
+            }
+        ],
+        [
+            {
+                "reference_id": "ref-1",
+                "file_path": "/kb/nsw-2022-sampling-design-part1.pdf",
+            }
+        ],
+    )
+    (citation,) = ce.extract_citations_from_rag_payload(payload)
+    assert citation["locator"] == "Table 9"
+    assert "3915" not in citation["locator"]
+
+
+def test_bare_p_digits_in_content_is_not_a_page():
+    payload = _payload(
+        [
+            {
+                "reference_id": "ref-1",
+                "file_path": "/kb/guide.pdf",
+                "chunk_id": "chunk-aa11",
+                "content": "Refer to appendix item p3915 for laboratory codes.",
+            }
+        ],
+        [{"reference_id": "ref-1", "file_path": "/kb/guide.pdf"}],
+    )
+    (citation,) = ce.extract_citations_from_rag_payload(payload)
+    assert citation["locator"] == "source passage"
+
+
+def test_written_page_reference_in_content_still_counts():
+    payload = _payload(
+        [
+            {
+                "reference_id": "ref-1",
+                "file_path": "/kb/guide.pdf",
+                "chunk_id": "chunk-bb22",
+                "content": "Minimum sampling densities are given in Table 2 (p. 94).",
+            }
+        ],
+        [{"reference_id": "ref-1", "file_path": "/kb/guide.pdf"}],
+    )
+    (citation,) = ce.extract_citations_from_rag_payload(payload)
+    assert citation["locator"] == "Table 2, p. 94"
+
+
+def test_table_mentioned_deep_in_prose_is_not_this_passages_locator():
+    payload = _payload(
+        [
+            {
+                "reference_id": "ref-1",
+                "file_path": "/kb/guide.pdf",
+                "chunk_id": "chunk-cc33",
+                "content": ("General discussion of site history requirements. " * 12)
+                + "See also Table 7 for a related summary.",
+            }
+        ],
+        [{"reference_id": "ref-1", "file_path": "/kb/guide.pdf"}],
+    )
+    (citation,) = ce.extract_citations_from_rag_payload(payload)
+    assert citation["locator"] == "source passage"
+
+
 # --- shared behavior ---
 
 
