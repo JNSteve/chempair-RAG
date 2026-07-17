@@ -593,7 +593,7 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
         if _has_usable_context(req.context):
             context_used = True
             logger.info(
-                "context_accepted schema_version=%s client_rev=%s project=%s session=%s map_keys=%s saqp_keys=%s",
+                "context_accepted schema_version=%s client_rev=%s project=%s session=%s map_keys=%s saqp_keys=%s field_summary=%s",
                 req.context.schemaVersion,
                 # Client build marker (extra field, absent from old bundles) —
                 # proves which frontend build produced this request.
@@ -609,6 +609,14 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
                 else None,
                 ",".join(sorted(req.context.saqpContext.model_dump(exclude_none=True)))
                 if req.context.saqpContext
+                else None,
+                # Counts only (never log descriptions) — proves whether the
+                # borehole-log block arrived and how much of it.
+                (
+                    f"boreholes={len(req.context.fieldContext.boreholes or [])},"
+                    f"truncated={bool(req.context.fieldContext.truncated)}"
+                )
+                if req.context.fieldContext
                 else None,
             )
         else:
