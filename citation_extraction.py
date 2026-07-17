@@ -131,8 +131,27 @@ def _citation_title(source: str) -> str:
     return stem or source
 
 
+# Table labels announce themselves at the start of a table chunk (or in a
+# structural chunk id) — a "Table 9" mentioned deep in prose is a cross-
+# reference, not this passage's location.
+MAX_TABLE_SCAN_CHARS = 300
+
+# Only explicit page signals count: the word "page" ("page 45", "page_45",
+# "table_page_45_chunk_2") or a written "p. 45". A bare "p" followed by
+# digits is NOT a page — it matches inside LightRAG's hex chunk hashes
+# (chunk-…4ap3915b… -> "p. 3915") and produces confident-looking wrong
+# locators. "(?:^|[^a-z0-9])" instead of \b because underscore-delimited
+# chunk ids have no word boundaries.
+PAGE_SIGNAL_PATTERN = re.compile(
+    r"(?:^|[^a-z0-9])page[\s._-]?(\d{1,4})|(?:^|[^a-z0-9])p\.\s*(\d{1,4})",
+    re.IGNORECASE,
+)
+
+
 def _extract_table_locator(text: str | None, chunk_id: str | None = None) -> str | None:
-    combined = " ".join(part for part in (text, chunk_id) if part)
+    combined = " ".join(
+        part for part in ((text or "")[:MAX_TABLE_SCAN_CHARS], chunk_id) if part
+    )
     table_match = re.search(
         r"\bTable\s+([A-Za-z]?\d+[A-Za-z]?(?:\([^)]+\))*)",
         combined,
@@ -143,27 +162,30 @@ def _extract_table_locator(text: str | None, chunk_id: str | None = None) -> str
     return f"Table {table_match.group(1)}"
 
 
+def _extract_page_locator(*parts: str | None) -> str | None:
+    combined = " ".join(part for part in parts if part)
+    page_match = PAGE_SIGNAL_PATTERN.search(combined)
+    if not page_match:
+        return None
+    return page_match.group(1) or page_match.group(2)
+
+
 def _citation_locator(
     reference_id: str | None,
     file_path: str | None,
     chunk_id: str | None,
     content: str | None = None,
 ) -> str:
-    combined = " ".join(
-        part for part in (file_path, chunk_id, reference_id, content) if part
-    )
     table_locator = _extract_table_locator(content, chunk_id)
-    page_match = re.search(r"(?:page|p)[\s._-]?(\d{1,4})", combined, re.IGNORECASE)
-    if table_locator and page_match:
-        return f"{table_locator}, p. {page_match.group(1)}"
+    page = _extract_page_locator(file_path, chunk_id, content)
+    if table_locator and page:
+        return f"{table_locator}, p. {page}"
     if table_locator:
         return table_locator
-    if page_match:
-        return f"p. {page_match.group(1)}"
-    if chunk_id:
-        return chunk_id
-    if reference_id:
-        return f"ref {reference_id}"
+    if page:
+        return f"p. {page}"
+    # No reliable signal: say so plainly rather than surfacing a raw chunk
+    # hash or a guessed number.
     return "source passage"
 
 
