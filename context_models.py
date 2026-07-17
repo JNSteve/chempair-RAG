@@ -225,6 +225,57 @@ class SaqpContext(BaseModel):
     relocatedPoints: Optional[int] = None
 
 
+class BoreholeLithologyInterval(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    depthFromM: Optional[float] = None
+    depthToM: Optional[float] = None
+    soilType: Optional[str] = None
+    colour: Optional[str] = None
+    moisture: Optional[str] = None
+    uscsCode: Optional[str] = None
+    observations: Optional[str] = None
+
+
+class BoreholeFieldSample(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sampleId: Optional[str] = None
+    depthFromM: Optional[float] = None
+    depthToM: Optional[float] = None
+    pidReading: Optional[float] = None
+    pidUnit: Optional[str] = None
+    odour: Optional[str] = None
+    observations: Optional[str] = None
+
+
+class BoreholeLog(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    boreholeId: Optional[str] = None
+    totalDepthM: Optional[float] = None
+    groundwaterDepthM: Optional[float] = None
+    drillingMethod: Optional[str] = None
+    lithology: Optional[List[BoreholeLithologyInterval]] = None
+    samples: Optional[List[BoreholeFieldSample]] = None
+
+
+class FieldContext(BaseModel):
+    """Field-collected evidence (schema v5, optional; PRD_101 Phase C):
+    borehole logs with lithology intervals, groundwater, and field samples
+    including PID readings. Captured from the app's field tables — Alfie
+    reports the values verbatim and never invents intervals or readings."""
+
+    model_config = ConfigDict(extra="allow")
+
+    sessionCount: Optional[int] = None
+    latestSessionDate: Optional[str] = None
+    boreholeCount: Optional[int] = None
+    fieldSampleCount: Optional[int] = None
+    boreholes: Optional[List[BoreholeLog]] = None
+    truncated: Optional[bool] = None
+
+
 class ProjectState(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -287,6 +338,7 @@ class WorkspaceContext(BaseModel):
     retrievalContext: Optional[RetrievalContext] = None
     mapContext: Optional[MapContext] = None
     saqpContext: Optional[SaqpContext] = None
+    fieldContext: Optional[FieldContext] = None
     conversation: Optional[List[ConversationMessage]] = Field(
         default=None, max_length=MAX_CONVERSATION_MESSAGES
     )
@@ -618,6 +670,82 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             parts.append(f"Field progress: {s.completedPoints} completed")
         if parts:
             sections.append("## Sampling Plan (SAQP)\n" + "\n".join(parts))
+
+    if ctx.fieldContext:
+        f = ctx.fieldContext
+        parts = []
+        if f.sessionCount is not None:
+            parts.append(f"Field sessions: {f.sessionCount}")
+        if f.latestSessionDate:
+            parts.append(f"Latest session: {f.latestSessionDate}")
+        if f.boreholeCount is not None:
+            parts.append(f"Boreholes: {f.boreholeCount}")
+        if f.fieldSampleCount is not None:
+            parts.append(f"Field samples: {f.fieldSampleCount}")
+        for hole in f.boreholes or []:
+            if not hole.boreholeId:
+                continue
+            header_bits = []
+            if hole.totalDepthM is not None:
+                header_bits.append(f"total depth {hole.totalDepthM:g} m")
+            if hole.groundwaterDepthM is not None:
+                header_bits.append(f"groundwater {hole.groundwaterDepthM:g} m")
+            if hole.drillingMethod:
+                header_bits.append(hole.drillingMethod)
+            header = f"- {hole.boreholeId}"
+            if header_bits:
+                header += f" ({', '.join(header_bits)})"
+            parts.append(header)
+            for interval in hole.lithology or []:
+                if interval.depthFromM is None or interval.depthToM is None:
+                    continue
+                bits = [
+                    bit
+                    for bit in (
+                        interval.soilType,
+                        interval.colour,
+                        interval.moisture,
+                        interval.uscsCode,
+                    )
+                    if bit
+                ]
+                line = (
+                    f"  {interval.depthFromM:g}-{interval.depthToM:g} m: "
+                    + (", ".join(bits) if bits else "no description")
+                )
+                if interval.observations:
+                    line += f" — {interval.observations}"
+                parts.append(line)
+            for sample in hole.samples or []:
+                bits = []
+                if sample.depthFromM is not None:
+                    depth = f"{sample.depthFromM:g}"
+                    if (
+                        sample.depthToM is not None
+                        and sample.depthToM != sample.depthFromM
+                    ):
+                        depth += f"-{sample.depthToM:g}"
+                    bits.append(f"@ {depth} m")
+                if sample.pidReading is not None:
+                    bits.append(
+                        f"PID {sample.pidReading:g} {sample.pidUnit or 'ppm'}"
+                    )
+                if sample.odour:
+                    bits.append(f"odour: {sample.odour}")
+                if sample.observations:
+                    bits.append(sample.observations)
+                if not bits and not sample.sampleId:
+                    continue
+                parts.append(
+                    f"  sample {sample.sampleId or '(unlabelled)'} "
+                    + " ".join(bits)
+                )
+        if f.truncated:
+            parts.append(
+                "(borehole list truncated — not all field data is shown)"
+            )
+        if parts:
+            sections.append("## Borehole Logs & Field Data\n" + "\n".join(parts))
 
     if retrieval_context:
         parts = []
