@@ -10,11 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
 COPY citation_extraction.py .
 COPY context_models.py .
-COPY context-bot-spec.md .
 COPY kb_info.py .
 COPY query_normalization.py .
-COPY query_grounding.py .
-COPY query_routing.py .
 COPY session_store.py .
 COPY upstream_errors.py .
 COPY start.py .

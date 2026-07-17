@@ -30,7 +30,21 @@ def test_dockerfile_copies_every_local_module_server_imports():
     )
 
 
-def test_dockerfile_copies_start_entrypoint_and_spec():
+def test_dockerfile_copies_start_entrypoint():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "COPY start.py" in dockerfile
-    assert "COPY context-bot-spec.md" in dockerfile
+
+
+def test_every_dockerfile_copy_source_exists():
+    """Reverse guard: a COPY of a deleted file fails the image build before
+    Railway even starts the container (bit us when the legacy routing modules
+    were removed but their COPY lines stayed behind)."""
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    sources = re.findall(r"^COPY\s+(\S+)\s+\S+$", dockerfile, re.MULTILINE)
+    assert sources, "expected COPY lines in the Dockerfile"
+
+    missing = [source for source in sources if not (ROOT / source).exists()]
+    assert not missing, (
+        f"Dockerfile COPYs files that do not exist: {missing} — the image "
+        "build will fail. Remove or fix these COPY lines."
+    )
