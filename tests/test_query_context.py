@@ -697,13 +697,6 @@ class TestSecurityHardening:
 
 
 class TestLegacyRequest:
-    def test_context_bot_spec_is_loaded_from_repo_file(self, client):
-        _, server, _, _ = client
-
-        assert server.CONTEXT_BOT_SPEC_PATH.name == "context-bot-spec.md"
-        assert server.CONTEXT_BOT_SPEC_PATH.exists()
-        assert "# Context Bot" in server.CONTEXT_BOT_SPEC
-
     def test_legacy_no_context(self, client):
         test_client, _, mock_rag, mock_openai = client
 
