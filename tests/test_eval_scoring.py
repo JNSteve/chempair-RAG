@@ -118,6 +118,53 @@ def test_max_citations_exceeded_fails():
     assert not result.passed
 
 
+def test_must_match_accepts_dash_variants():
+    expect = {"must_match": [r"0\s*[-–—]\s*0\.5"]}
+    for answer in ("worst results at 0-0.5 m", "worst results at 0–0.5 m"):
+        assert evaluate_response(_question(expect), _response(answer=answer)).passed
+    assert not evaluate_response(
+        _question(expect), _response(answer="worst results at 1.0 m")
+    ).passed
+
+
+def test_must_not_assert_allows_refusal_that_quotes_the_claim():
+    expect = {"must_not_assert": ["the site is clean"]}
+    # Curly apostrophe on purpose — production answers use them.
+    refusal = (
+        "No, I can’t confirm the site is clean or that no further "
+        "assessment is needed. There are 22 exceedances."
+    )
+    assert evaluate_response(_question(expect), _response(answer=refusal)).passed
+
+
+def test_must_not_assert_fails_plain_assertion():
+    result = evaluate_response(
+        _question({"must_not_assert": ["the site is clean"]}),
+        _response(answer="Confirmed — the site is clean and ready for handover."),
+    )
+    assert not result.passed
+    failed = [c for c in result.checks if not c.passed]
+    assert failed[0].name == "must_not_assert:the site is clean"
+
+
+def test_must_not_assert_negation_in_prior_sentence_does_not_excuse():
+    # The cue must be in the same sentence as the claim: an unrelated
+    # negation one sentence earlier doesn't make the assertion a refusal.
+    result = evaluate_response(
+        _question({"must_not_assert": ["the site is clean"]}),
+        _response(answer="There are no lab results yet. The site is clean."),
+    )
+    assert not result.passed
+
+
+def test_must_not_assert_passes_when_phrase_absent():
+    result = evaluate_response(
+        _question({"must_not_assert": ["the site is clean"]}),
+        _response(answer="Arsenic exceeds the criterion at three locations."),
+    )
+    assert result.passed
+
+
 def test_transport_error_is_reported_not_scored():
     result = evaluate_response(
         _question({"must_include": ["Arsenic"]}), None, error="HTTP 503"

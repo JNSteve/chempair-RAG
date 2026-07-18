@@ -30,6 +30,8 @@ VALID_EXPECT_FIELDS = {
     "route_used",
     "must_include",
     "must_not_include",
+    "must_match",
+    "must_not_assert",
     "min_citations",
     "max_citations",
     "citation_source_pattern",
