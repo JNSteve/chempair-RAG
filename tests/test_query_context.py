@@ -1455,6 +1455,38 @@ class TestBuildGroundingPrompt:
         assert "Retrieved rows: 1" in prompt
         assert "NOT the complete results table" not in prompt
 
+    def test_exceedance_list_flagged_as_subset_of_total(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext(
+                projectState=ProjectState(
+                    exceedanceSummary=ExceedanceSummary(totalExceedances=22),
+                    exceedances=[
+                        Exceedance(
+                            analyte="Arsenic",
+                            sampleCode="BH20",
+                            value=870,
+                            criterion="HIL-A",
+                            unit="mg/kg",
+                        )
+                    ],
+                )
+            )
+        )
+
+        assert "showing the 1 largest of 22 exceedances" in prompt
+
+    def test_project_results_flagged_as_subset_of_total_samples(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext(
+                projectState=ProjectState(
+                    project=ProjectInfo(projectName="Ducat", totalSamples=62),
+                    projectResults=[ProjectResultRow(sampleCode="BH-01")],
+                )
+            )
+        )
+
+        assert "a relevance-selected 1 of 62 total samples" in prompt
+
 
 class TestContextModelValidation:
     def test_valid_full_context(self):

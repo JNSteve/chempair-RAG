@@ -550,6 +550,16 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                     row += f" against {ex.criterion}"
                 rows.append(row)
         if rows:
+            total = (
+                project_state.exceedanceSummary.totalExceedances
+                if project_state.exceedanceSummary
+                else None
+            )
+            if total and total > len(rows):
+                rows.append(
+                    f"(showing the {len(rows)} largest of {total} exceedances "
+                    "— not the full list)"
+                )
             sections.append("## Exceedances\n" + "\n".join(rows))
 
     if project_state and project_state.projectResults:
@@ -572,6 +582,14 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                     row += ": " + ", ".join(vals)
                 rows.append(row)
         if rows:
+            total_samples = (
+                project_state.project.totalSamples if project_state.project else None
+            )
+            if total_samples and total_samples > len(rows):
+                rows.append(
+                    f"(a relevance-selected {len(rows)} of {total_samples} total "
+                    "samples — not the complete results table)"
+                )
             sections.append("## Project Results\n" + "\n".join(rows))
 
     if project_state and project_state.fieldSummary:
