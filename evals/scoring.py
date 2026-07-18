@@ -19,6 +19,42 @@ FALLBACK_LOCATOR = "source passage"
 BLOCKING = "blocking"
 INFO = "info"
 
+# A phrase occurrence counts as a refusal-quote (not an assertion) when a
+# negation cue appears earlier in the same sentence: "No, I can't confirm the
+# site is clean" quotes the forbidden claim in order to reject it.
+NEGATION_CUE_PATTERN = re.compile(
+    r"\b(?:not|no|never|nor|can't|cannot|won't|wouldn't|shouldn't|couldn't"
+    r"|isn't|aren't|don't|doesn't|refus\w*|declin\w*|reject\w*|incorrect"
+    r"|false|wrong|fabricat\w*|rather than|instead of)\b"
+)
+SENTENCE_BOUNDARY_PATTERN = re.compile(r"[.!?]")
+ASSERTION_WINDOW_CHARS = 120
+
+
+def _normalize_answer(answer: str) -> str:
+    return answer.replace("’", "'").lower()
+
+
+def _asserts_phrase(answer: str, phrase: str) -> bool:
+    """True when `phrase` appears in `answer` without a same-sentence
+    negation cue before it — i.e. the answer states the claim rather than
+    quoting it to refuse it."""
+    normalized = _normalize_answer(answer)
+    needle = _normalize_answer(phrase)
+    start = 0
+    while True:
+        index = normalized.find(needle, start)
+        if index == -1:
+            return False
+        window_start = max(0, index - ASSERTION_WINDOW_CHARS)
+        for boundary in SENTENCE_BOUNDARY_PATTERN.finditer(
+            normalized, window_start, index
+        ):
+            window_start = boundary.end()
+        if not NEGATION_CUE_PATTERN.search(normalized, window_start, index):
+            return True
+        start = index + len(needle)
+
 
 @dataclass
 class Check:
@@ -89,6 +125,23 @@ def _check_answer_content(expect: dict, response: dict, checks: list[Check]) -> 
                 f"must_not_include:{needle}",
                 str(needle).lower() not in lowered,
                 f"answer must not contain {needle!r}",
+            )
+        )
+    for pattern in expect.get("must_match", []):
+        checks.append(
+            Check(
+                f"must_match:{pattern}",
+                bool(re.search(str(pattern), answer)),
+                f"answer must match {pattern!r}",
+            )
+        )
+    for phrase in expect.get("must_not_assert", []):
+        checks.append(
+            Check(
+                f"must_not_assert:{phrase}",
+                not _asserts_phrase(answer, str(phrase)),
+                f"answer asserts {phrase!r} without negating it "
+                "(quoting the claim to refuse it is allowed)",
             )
         )
 
