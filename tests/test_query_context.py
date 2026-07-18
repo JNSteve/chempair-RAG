@@ -1422,6 +1422,39 @@ class TestBuildGroundingPrompt:
         assert "Matched analytes: Lead" in prompt
         assert "Retrieved rows: 1" in prompt
 
+    def test_retrieved_rows_flagged_as_subset_of_total_samples(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext(
+                projectState=ProjectState(
+                    project=ProjectInfo(projectName="Ducat", totalSamples=300),
+                ),
+                retrievalContext=RetrievalContext(
+                    retrievedRows=[
+                        ProjectResultRow(sampleCode="BH-01"),
+                        ProjectResultRow(sampleCode="BH-02"),
+                    ],
+                ),
+            )
+        )
+
+        assert "Retrieved rows: 2 of 300 total samples" in prompt
+        assert "NOT the complete results table" in prompt
+
+    def test_retrieved_rows_not_flagged_when_they_are_the_full_table(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext(
+                projectState=ProjectState(
+                    project=ProjectInfo(projectName="Ducat", totalSamples=1),
+                ),
+                retrievalContext=RetrievalContext(
+                    retrievedRows=[ProjectResultRow(sampleCode="BH-01")],
+                ),
+            )
+        )
+
+        assert "Retrieved rows: 1" in prompt
+        assert "NOT the complete results table" not in prompt
+
 
 class TestContextModelValidation:
     def test_valid_full_context(self):

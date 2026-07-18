@@ -752,7 +752,20 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                 f"Matched samples: {', '.join(retrieval_context.matchedSampleCodes)}"
             )
         if retrieval_context.retrievedRows:
-            parts.append(f"Retrieved rows: {len(retrieval_context.retrievedRows)}")
+            row_count = len(retrieval_context.retrievedRows)
+            total_samples = (
+                project_state.project.totalSamples
+                if project_state and project_state.project
+                else None
+            )
+            if total_samples and total_samples > row_count:
+                parts.append(
+                    f"Retrieved rows: {row_count} of {total_samples} total "
+                    "samples — a relevance-selected subset, NOT the complete "
+                    "results table."
+                )
+            else:
+                parts.append(f"Retrieved rows: {row_count}")
             # Question-matched sample rows are the most relevant lab evidence —
             # render their values, not just the count.
             for row in retrieval_context.retrievedRows[:30]:
