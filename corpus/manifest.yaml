@@ -381,3 +381,139 @@ documents:
   source_url: null
   ingested_at: '2026-07-07T00:56:05+00:00'
   ingested_sha256: 8f7b68c81c3d47d3956183a6960a6b22de8cddc1135fa23c246f242b02e012f4
+- doc_id: crc-care-tr10-part1
+  title: 'CRC CARE Technical Report 10 Part 1: HSLs for petroleum hydrocarbons - technical
+    development'
+  family: OTHER
+  jurisdiction: AU
+  version: '2011'
+  status: current
+  superseded_by: null
+  filename: CRC-CARE-Tech-Report-10-Part-1-Technical-development-document.pdf
+  sha256: 51f0cf32a1ce76d9bd482a299e2a9c5afc470110105ee1793e657fb60d5c32f3
+  source_url: null
+  ingested_at: '2026-07-17T07:15:36+00:00'
+  ingested_sha256: 51f0cf32a1ce76d9bd482a299e2a9c5afc470110105ee1793e657fb60d5c32f3
+- doc_id: crc-care-tr10-part2
+  title: 'CRC CARE Technical Report 10 Part 2: HSLs for petroleum hydrocarbons - application
+    document'
+  family: OTHER
+  jurisdiction: AU
+  version: '2011'
+  status: current
+  superseded_by: null
+  filename: CRCCARETechReport10-Part2-Applicationdocument2.pdf
+  sha256: 64105df608d427cba5d4f8b69c152f3fbd55227b6fda238c20f2834e9a5d397d
+  source_url: null
+  ingested_at: '2026-07-17T07:27:58+00:00'
+  ingested_sha256: 64105df608d427cba5d4f8b69c152f3fbd55227b6fda238c20f2834e9a5d397d
+- doc_id: crc-care-tr10-part3
+  title: 'CRC CARE Technical Report 10 Part 3: HSLs for petroleum hydrocarbons - sensitivity
+    assessment'
+  family: OTHER
+  jurisdiction: AU
+  version: '2011'
+  status: current
+  superseded_by: null
+  filename: CRCCARETechReport10-Part3-Sensitivityassessment2.pdf
+  sha256: b2f5c2890994732e5aded682cdcde0fb3eb1c9ffd562f21e0b10946345602ebb
+  source_url: null
+  ingested_at: '2026-07-17T07:32:26+00:00'
+  ingested_sha256: b2f5c2890994732e5aded682cdcde0fb3eb1c9ffd562f21e0b10946345602ebb
+- doc_id: nass-sampling-identification-2018
+  title: National Acid Sulfate Soils sampling and identification methods manual
+  family: OTHER
+  jurisdiction: AU
+  version: '2018'
+  status: current
+  superseded_by: null
+  filename: sampling-identification-methods_1.pdf
+  sha256: b3e53f186f7442308be18ec4adba387d82be571ce5ca05c10196477c1a0f2e5e
+  source_url: null
+  ingested_at: '2026-07-17T07:40:45+00:00'
+  ingested_sha256: b3e53f186f7442308be18ec4adba387d82be571ce5ca05c10196477c1a0f2e5e
+- doc_id: nsw-2022-emp-practice-note
+  title: 'NSW EPA Practice Note: Environmental management plans for contaminated land'
+  family: NSW
+  jurisdiction: NSW
+  version: '2022'
+  status: current
+  superseded_by: null
+  filename: 22p3473-emps-for-contaminated-land-practice-note.pdf
+  sha256: 8936668d6dec815f2a86963b3f264e80f9e53cab84c80d73780a27e6800663d7
+  source_url: null
+  ingested_at: '2026-07-17T07:44:32+00:00'
+  ingested_sha256: 8936668d6dec815f2a86963b3f264e80f9e53cab84c80d73780a27e6800663d7
+- doc_id: nsw-2017-site-auditor-scheme
+  title: Guidelines for the NSW Site Auditor Scheme (3rd edition)
+  family: NSW
+  jurisdiction: NSW
+  version: '2017'
+  status: current
+  superseded_by: null
+  filename: 17p0269-guidelines-for-the-nsw-site-auditor-scheme-third-edition.pdf
+  sha256: 45a236f550f185c4e29123dae85ab254218e1afe52d5df87681efcdb7cc58272
+  source_url: null
+  ingested_at: '2026-07-17T07:52:56+00:00'
+  ingested_sha256: 45a236f550f185c4e29123dae85ab254218e1afe52d5df87681efcdb7cc58272
+- doc_id: qld-auditor-handbook-module6
+  title: 'Queensland Auditor Handbook for Contaminated Land - Module 6: Content requirements'
+  family: QLD
+  jurisdiction: QLD
+  version: '2025'
+  status: current
+  superseded_by: null
+  filename: Queensland Auditor Handbook for contaminated land.pdf
+  sha256: df804c296f3a93893ab64523a60d15397e3f7477f050b78c58bc76ec605c5fd9
+  source_url: null
+  ingested_at: '2026-07-17T07:57:10+00:00'
+  ingested_sha256: df804c296f3a93893ab64523a60d15397e3f7477f050b78c58bc76ec605c5fd9
+- doc_id: nhmrc-adwg-v4
+  title: NHMRC Australian Drinking Water Guidelines (Version 4, updated 2025)
+  family: OTHER
+  jurisdiction: AU
+  version: '2025'
+  status: current
+  superseded_by: null
+  filename: Australian-drinking-water-guidelines-6-Version 4.pdf
+  sha256: be9df79e9d3b75677bcde53c9f4d9361076da387017f556812941a2e69533f1a
+  source_url: null
+  ingested_at: '2026-07-17T11:35:58+00:00'
+  ingested_sha256: be9df79e9d3b75677bcde53c9f4d9361076da387017f556812941a2e69533f1a
+- doc_id: anzg-2026-toxicant-dgv-master-table
+  title: ANZG Toxicant default guideline values - master table (2026)
+  family: ANZECC
+  jurisdiction: AU
+  version: '2026'
+  status: current
+  superseded_by: null
+  filename: toxicants-dgvs-mastertable.pdf
+  sha256: 02776c428468fb13b83793fec548e3d889979eb009c9e82204715c7ba25e87e0
+  source_url: null
+  ingested_at: '2026-07-17T11:46:38+00:00'
+  ingested_sha256: 02776c428468fb13b83793fec548e3d889979eb009c9e82204715c7ba25e87e0
+- doc_id: qld-sqp-guideline
+  title: 'Queensland Guideline: Assessing a suitably qualified person (ESR/2016/1938)'
+  family: QLD
+  jurisdiction: QLD
+  version: '2016'
+  status: current
+  superseded_by: null
+  filename: qld-sqp-guideline.pdf
+  sha256: 158948f73abdeca920f2af58a0717d82ea7efbdde99d4905dd1b80faff6f92bb
+  source_url: null
+  ingested_at: '2026-07-17T11:54:22+00:00'
+  ingested_sha256: 158948f73abdeca920f2af58a0717d82ea7efbdde99d4905dd1b80faff6f92bb
+- doc_id: nsw-2020-emp-guideline
+  title: 'NSW EPA Guidelines: Preparing environmental management plans for contaminated
+    land'
+  family: NSW
+  jurisdiction: NSW
+  version: '2020'
+  status: current
+  superseded_by: null
+  filename: 20p2675-preparing-environmental-management-plans-for-contaminated-land.pdf
+  sha256: 225b4634e92a1c765db955187fc21e074c2905a594a7a4e37beb9e58bf8576f8
+  source_url: null
+  ingested_at: '2026-07-17T12:04:49+00:00'
+  ingested_sha256: 225b4634e92a1c765db955187fc21e074c2905a594a7a4e37beb9e58bf8576f8
