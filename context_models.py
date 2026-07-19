@@ -692,7 +692,9 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                 verdict = (
                     "EXCEEDS"
                     if entry.exceedsCriteria
-                    else "below" if entry.exceedsCriteria is not None else "vs"
+                    else "below"
+                    if entry.exceedsCriteria is not None
+                    else "vs"
                 )
                 line += f" — {verdict} criterion {entry.criterionValue:g}{unit}"
             if entry.isReliable is False and entry.reliabilityWarning:
@@ -732,7 +734,9 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                 continue
             line = f"- {stat.analyte}"
             if stat.detectionCount is not None and stat.totalSamples is not None:
-                line += f": detected in {stat.detectionCount}/{stat.totalSamples} samples"
+                line += (
+                    f": detected in {stat.detectionCount}/{stat.totalSamples} samples"
+                )
             if stat.detectionRatePct is not None:
                 line += f" ({stat.detectionRatePct:g}%)"
             rows.append(line)
@@ -906,9 +910,7 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             if point.depthFromM is not None and point.depthToM is not None:
                 line += f" ({point.depthFromM:g}-{point.depthToM:g} m)"
             details = [
-                d
-                for d in (point.matrix, point.priority, point.executionStatus)
-                if d
+                d for d in (point.matrix, point.priority, point.executionStatus) if d
             ]
             if details:
                 line += f" [{', '.join(details)}]"

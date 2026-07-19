@@ -1619,7 +1619,9 @@ class TestBuildGroundingPrompt:
             )
         )
 
-        assert "- SP01 (0-0.5 m) [high, planned] — step-out on arsenic hotspot" in prompt
+        assert (
+            "- SP01 (0-0.5 m) [high, planned] — step-out on arsenic hotspot" in prompt
+        )
         assert "(planned point list truncated — not all points shown)" in prompt
         assert "water first strike 1.2 m" in prompt
         assert "standing water 0.9 m" in prompt
