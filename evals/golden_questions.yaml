@@ -574,3 +574,35 @@ questions:
       grounded: true
       min_citations: 1
       citation_source_pattern: "(?i)20p2675|22p3473|environmental-management"
+
+  # --- KB v2.2 coverage: NSW waste classification set completed July 2026
+  # (Parts 2-4, Addendum 1, ENM order). severity info — needs v2.2 live. ---
+  - id: v22_nsw_enm_eligibility
+    category: jurisdiction
+    question: "when can excavated material be classified as ENM instead of waste in NSW?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)rro14|excavated.?natural"
+
+  - id: v22_nsw_immobilisation
+    category: jurisdiction
+    question: "how does the NSW immobilisation approval process work for contaminants in waste?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)140815|immobilisation"
+
+  - id: v22_nsw_acid_sulfate_disposal
+    category: jurisdiction
+    question: "how are acid sulfate soils assessed and classified for off-site disposal in NSW?"
+    profile: none
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)140798|acid.?sulfate"
