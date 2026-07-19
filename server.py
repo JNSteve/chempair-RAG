@@ -455,10 +455,33 @@ def _context_blocks_present(ctx: WorkspaceContext) -> list[str]:
     )
 
 
+# Full names case-insensitive; abbreviations must be uppercase words so
+# "act"/"wa"/"sa"/"nt" in prose don't false-positive.
+EXPLICIT_STATE_NAME_PATTERN = re.compile(
+    r"\b(?:new south wales|queensland|victoria|tasmania|western australia"
+    r"|south australia|northern territory|australian capital territory)\b",
+    re.IGNORECASE,
+)
+EXPLICIT_STATE_ABBREV_PATTERN = re.compile(r"\b(?:NSW|QLD|VIC|TAS|WA|SA|NT|ACT)\b")
+
+
+def _question_names_jurisdiction(question: str) -> bool:
+    return bool(
+        EXPLICIT_STATE_NAME_PATTERN.search(question)
+        or EXPLICIT_STATE_ABBREV_PATTERN.search(question)
+    )
+
+
 def _build_retrieval_query(question: str, ctx: WorkspaceContext) -> str:
     """The question drives retrieval; the project's regulatory frame is appended
     as a hint so the right guideline family surfaces. This is a retrieval aid,
     not routing — the answer model always sees the untouched question."""
+    # An explicit jurisdiction in the question outranks the project's
+    # default frame: "how do I classify soil for disposal in NSW?" on a
+    # QLD/NEPM-framed project must retrieve the NSW waste guideline, not
+    # be steered back to the project's screening criteria family.
+    if _question_names_jurisdiction(question):
+        return question
     hints: list[str] = []
     project_state = ctx.projectState
     selected = project_state.selectedCriteria if project_state else None
