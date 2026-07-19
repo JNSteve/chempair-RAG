@@ -926,6 +926,36 @@ class TestUnifiedAnswering:
         assert "what soil sampling density do i need?" in retrieval_query
         assert "NEPM 2013 HIL-A" in retrieval_query
 
+    def test_explicit_jurisdiction_drops_the_project_frame(self, client):
+        # Field report: "classify excavated soil for off-site disposal in
+        # NSW?" on a NEPM-framed project retrieved NEPM volumes instead of
+        # the NSW waste guideline — the appended frame outweighed the
+        # question's own jurisdiction. An explicit state wins.
+        test_client, _, mock_rag, _ = client
+
+        self._post(
+            test_client,
+            "how do I classify excavated soil for off-site disposal in NSW?",
+            _full_context(),
+        )
+
+        retrieval_query = mock_rag.lightrag.aquery_data.await_args.args[0]
+        assert retrieval_query == (
+            "how do I classify excavated soil for off-site disposal in NSW?"
+        )
+        assert "regulatory frame" not in retrieval_query
+
+    def test_lowercase_state_words_do_not_drop_the_frame(self, client):
+        # "act" the verb must not read as the ACT jurisdiction.
+        test_client, _, mock_rag, _ = client
+
+        self._post(
+            test_client, "how should the epa act on these results?", _full_context()
+        )
+
+        retrieval_query = mock_rag.lightrag.aquery_data.await_args.args[0]
+        assert "NEPM 2013 HIL-A" in retrieval_query
+
     def test_citations_come_from_the_same_retrieval_the_model_saw(self, client):
         test_client, _, _, _ = client
 

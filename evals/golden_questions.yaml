@@ -228,6 +228,19 @@ questions:
       grounded: true
       min_citations: 1
 
+  # Field-reported regression: asked WITH a NEPM-framed project open, the
+  # appended regulatory frame used to steer retrieval away from the NSW
+  # waste guideline. The explicit jurisdiction must win.
+  - id: nsw_waste_disposal_with_project_frame
+    category: jurisdiction
+    question: "how do I classify excavated soil for off-site disposal in NSW?"
+    profile: ducat_soil
+    severity: info
+    expect:
+      grounded: true
+      min_citations: 1
+      citation_source_pattern: "(?i)140796|classify.?waste|waste.?classification"
+
   - id: vic_contaminated_soil
     category: jurisdiction
     question: "what Victorian guidance applies to contaminated soil assessment?"
