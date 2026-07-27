@@ -13,7 +13,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install ruff
+      # Pinned: an unpinned ruff broke CI when a new release expanded the
+      # default rule set (352 errors across pre-existing files, 2026-07-27).
+      # Keep in step with the local dev venv when upgrading deliberately.
+      - run: pip install ruff==0.15.8
       - run: ruff check .
       - run: ruff format --check .
 
