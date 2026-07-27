@@ -798,11 +798,11 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
                 map_image,
             )
 
-            # Flag-gated second call; every failure degrades to no
-            # proposals. RAG_ENABLE_PROPOSALS ships off until the frontend
-            # is ready to render proposal cards.
+            # Second call for edit proposals; every failure degrades to no
+            # proposals. On by default now both sides of the contract are
+            # live — set RAG_ENABLE_PROPOSALS=false to kill-switch.
             if (
-                _env_flag("RAG_ENABLE_PROPOSALS", False)
+                _env_flag("RAG_ENABLE_PROPOSALS", True)
                 and req.context.proposalContext is not None
             ):
                 proposals_payload = await generate_proposals(
