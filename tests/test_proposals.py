@@ -194,3 +194,116 @@ class TestUpdatePointAttributes:
             _validate_update_point_attributes(
                 {"pointId": "pt-1", "notes": "x" * 601}, saqp
             )
+
+
+from proposals import (
+    _validate_add_linkage,
+    _validate_update_linkage,
+    _validate_update_narrative,
+)
+
+
+class TestAddLinkage:
+    def test_valid_payload(self):
+        _, csm = _artifacts()
+        result = _validate_add_linkage(
+            {
+                "sourceId": "s1",
+                "pathwayId": "p1",
+                "receptorId": "r1",
+                "riskLevel": "moderate",
+                "isComplete": False,
+                "reasoning": "Leaching pathway plausible given TRH exceedances.",
+            },
+            csm,
+        )
+        assert result["riskLevel"] == "moderate"
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"sourceId": "ghost"},
+            {"pathwayId": "ghost"},
+            {"receptorId": "ghost"},
+            {"riskLevel": "severe"},
+            {"isComplete": "false"},
+            {"reasoning": "x" * 601},
+            {"extra": 1},
+        ],
+    )
+    def test_out_of_contract_rejected(self, overrides):
+        _, csm = _artifacts()
+        payload = {
+            "sourceId": "s1",
+            "pathwayId": "p1",
+            "receptorId": "r1",
+            "riskLevel": "moderate",
+            "isComplete": False,
+            "reasoning": "ok",
+        }
+        payload.update(overrides)
+        with pytest.raises(ProposalRejected):
+            _validate_add_linkage(payload, csm)
+
+
+class TestUpdateLinkage:
+    def test_single_field_ok(self):
+        _, csm = _artifacts()
+        result = _validate_update_linkage({"linkageId": "l1", "isComplete": True}, csm)
+        assert result == {"linkageId": "l1", "isComplete": True}
+
+    def test_bare_linkage_id_rejected(self):
+        # Mirrors enviro-sage PR #614.
+        _, csm = _artifacts()
+        with pytest.raises(ProposalRejected, match="No fields to update"):
+            _validate_update_linkage({"linkageId": "l1"}, csm)
+
+    def test_unknown_linkage_rejected(self):
+        _, csm = _artifacts()
+        with pytest.raises(ProposalRejected):
+            _validate_update_linkage({"linkageId": "ghost", "isComplete": True}, csm)
+
+
+class TestUpdateNarrative:
+    def test_summary_text(self):
+        _, csm = _artifacts()
+        result = _validate_update_narrative(
+            {"section": "csmSummary", "text": "Summary."}, csm
+        )
+        assert result == {"section": "csmSummary", "text": "Summary."}
+
+    def test_key_findings_items(self):
+        _, csm = _artifacts()
+        result = _validate_update_narrative(
+            {"section": "keyFindings", "items": ["Finding one", "Finding two"]}, csm
+        )
+        assert result["items"] == ["Finding one", "Finding two"]
+
+    def test_exposure_justification_checks_media(self):
+        _, csm = _artifacts()
+        result = _validate_update_narrative(
+            {"section": "exposureJustification", "medium": "Soil", "text": "Why."},
+            csm,
+        )
+        assert result["medium"] == "Soil"
+        with pytest.raises(ProposalRejected, match="not an affected medium"):
+            _validate_update_narrative(
+                {"section": "exposureJustification", "medium": "Air", "text": "Why."},
+                csm,
+            )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"section": "csmSummary", "text": "x" * 4001},
+            {"section": "keyFindings", "items": []},
+            {"section": "keyFindings", "items": ["x"] * 11},
+            {"section": "keyFindings", "items": ["x" * 301]},
+            {"section": "background", "text": "x"},
+            {"section": "csmSummary", "text": "x", "bogus": 1},
+        ],
+    )
+    def test_out_of_contract_rejected(self, payload):
+        _, csm = _artifacts()
+        with pytest.raises(ProposalRejected):
+            _validate_update_narrative(payload, csm)

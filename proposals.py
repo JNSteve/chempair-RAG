@@ -331,3 +331,97 @@ def _validate_update_point_attributes(payload: dict, saqp: SaqpArtifact) -> dict
     if len(result) == 1:
         _fail("No fields to update")
     return result
+
+
+# ---- CSM payload validators ----
+
+
+def _validate_add_linkage(payload: dict, csm: CsmArtifact) -> dict:
+    _exact_keys(
+        payload,
+        frozenset(
+            {
+                "sourceId",
+                "pathwayId",
+                "receptorId",
+                "riskLevel",
+                "isComplete",
+                "reasoning",
+            }
+        ),
+        "payload",
+    )
+    return {
+        "sourceId": _known_id(
+            payload.get("sourceId"), "payload.sourceId", csm.source_ids
+        ),
+        "pathwayId": _known_id(
+            payload.get("pathwayId"), "payload.pathwayId", csm.pathway_ids
+        ),
+        "receptorId": _known_id(
+            payload.get("receptorId"), "payload.receptorId", csm.receptor_ids
+        ),
+        "riskLevel": _as_enum(
+            payload.get("riskLevel"), "payload.riskLevel", RISK_LEVELS
+        ),
+        "isComplete": _as_bool(payload.get("isComplete"), "payload.isComplete"),
+        "reasoning": _capped_str(
+            payload.get("reasoning"), "payload.reasoning", MAX_NOTES_CHARS
+        ),
+    }
+
+
+def _validate_update_linkage(payload: dict, csm: CsmArtifact) -> dict:
+    _exact_keys(
+        payload, frozenset({"linkageId", "riskLevel", "isComplete", "notes"}), "payload"
+    )
+    result = {
+        "linkageId": _known_id(
+            payload.get("linkageId"), "payload.linkageId", csm.linkage_ids
+        )
+    }
+    if payload.get("riskLevel") is not None:
+        result["riskLevel"] = _as_enum(
+            payload.get("riskLevel"), "payload.riskLevel", RISK_LEVELS
+        )
+    if payload.get("isComplete") is not None:
+        result["isComplete"] = _as_bool(
+            payload.get("isComplete"), "payload.isComplete"
+        )
+    notes = _opt_capped_str(payload.get("notes"), "payload.notes", MAX_NOTES_CHARS)
+    if notes is not None:
+        result["notes"] = notes
+    if len(result) == 1:
+        # Mirrors enviro-sage PR #614 (validate.ts 'No fields to update').
+        _fail("No fields to update")
+    return result
+
+
+def _validate_update_narrative(payload: dict, csm: CsmArtifact) -> dict:
+    _exact_keys(payload, frozenset({"section", "medium", "text", "items"}), "payload")
+    section = _as_enum(payload.get("section"), "payload.section", NARRATIVE_SECTIONS)
+    if section == "csmSummary":
+        return {
+            "section": section,
+            "text": _capped_str(
+                payload.get("text"), "payload.text", MAX_NARRATIVE_CHARS
+            ),
+        }
+    if section in ("keyFindings", "recommendations"):
+        return {
+            "section": section,
+            "items": _string_list(
+                payload.get("items"),
+                "payload.items",
+                MAX_LIST_ITEMS,
+                MAX_LIST_ITEM_CHARS,
+            ),
+        }
+    medium = _capped_str(payload.get("medium"), "payload.medium", MAX_NAME_CHARS)
+    if medium not in csm.media:
+        _fail("payload.medium is not an affected medium")
+    return {
+        "section": section,
+        "medium": medium,
+        "text": _capped_str(payload.get("text"), "payload.text", MAX_NARRATIVE_CHARS),
+    }
