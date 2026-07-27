@@ -307,3 +307,222 @@ class TestUpdateNarrative:
         _, csm = _artifacts()
         with pytest.raises(ProposalRejected):
             _validate_update_narrative(payload, csm)
+
+
+import asyncio
+import json
+
+from proposals import (
+    MAX_PROPOSALS_PER_ANSWER,
+    build_proposals_prompt,
+    generate_proposals,
+    parse_llm_proposals,
+    validate_candidate,
+)
+
+
+def _grid_candidate(**overrides) -> dict:
+    candidate = {
+        "operation": "saqp.set_grid_parameters",
+        "payload": {"gridEnabled": True, "gridSizeM": 40},
+        "rationale": "Systematic 40 m grid coverage per NEPM Sch B2 guidance.",
+        "citations": [{"source": "NEPM 2013 Sch B2", "locator": "s4.2"}],
+    }
+    candidate.update(overrides)
+    return candidate
+
+
+class TestValidateCandidate:
+    def test_valid_candidate_gets_full_envelope(self):
+        saqp, csm = _artifacts()
+        envelope = validate_candidate(_grid_candidate(), saqp, csm)
+        assert envelope["kind"] == "saqp"
+        assert envelope["operation"] == "saqp.set_grid_parameters"
+        assert envelope["id"].startswith("prop-")
+        assert len(envelope["id"]) <= 128
+        assert envelope["baseline"] == {
+            "artifactId": "plan-1",
+            "updatedAt": "2026-07-27T00:00:00.000Z",
+        }
+        assert envelope["citations"] == [
+            {"source": "NEPM 2013 Sch B2", "locator": "s4.2"}
+        ]
+
+    def test_csm_candidate_gets_csm_baseline(self):
+        saqp, csm = _artifacts()
+        envelope = validate_candidate(
+            {
+                "operation": "csm.update_linkage",
+                "payload": {"linkageId": "l1", "isComplete": True},
+                "rationale": "Linkage supported by groundwater exceedances.",
+            },
+            saqp,
+            csm,
+        )
+        assert envelope["kind"] == "csm"
+        assert envelope["baseline"]["artifactId"] == "csm-1"
+        assert envelope["citations"] == []
+
+    def test_model_supplied_envelope_fields_ignored(self):
+        saqp, csm = _artifacts()
+        envelope = validate_candidate(
+            _grid_candidate(
+                id="model-id",
+                kind="csm",
+                baseline={"artifactId": "fake", "updatedAt": "fake"},
+            ),
+            saqp,
+            csm,
+        )
+        assert envelope["id"] != "model-id"
+        assert envelope["kind"] == "saqp"
+        assert envelope["baseline"]["artifactId"] == "plan-1"
+
+    def test_unknown_operation_rejected(self):
+        saqp, csm = _artifacts()
+        with pytest.raises(ProposalRejected):
+            validate_candidate(
+                _grid_candidate(operation="saqp.delete_point"), saqp, csm
+            )
+
+    def test_saqp_operation_without_saqp_artifact_rejected(self):
+        _, csm = _artifacts()
+        with pytest.raises(ProposalRejected):
+            validate_candidate(_grid_candidate(), None, csm)
+
+    def test_missing_rationale_rejected(self):
+        saqp, csm = _artifacts()
+        candidate = _grid_candidate()
+        del candidate["rationale"]
+        with pytest.raises(ProposalRejected):
+            validate_candidate(candidate, saqp, csm)
+
+    def test_rationale_cap_600(self):
+        saqp, csm = _artifacts()
+        with pytest.raises(ProposalRejected):
+            validate_candidate(_grid_candidate(rationale="x" * 601), saqp, csm)
+
+    def test_citation_without_source_dropped(self):
+        saqp, csm = _artifacts()
+        envelope = validate_candidate(
+            _grid_candidate(citations=[{"locator": "s1"}, {"source": "NEPM 2013"}]),
+            saqp,
+            csm,
+        )
+        assert envelope["citations"] == [{"source": "NEPM 2013"}]
+
+    def test_seven_citations_rejected(self):
+        saqp, csm = _artifacts()
+        with pytest.raises(ProposalRejected):
+            validate_candidate(
+                _grid_candidate(citations=[{"source": f"S{i}"} for i in range(7)]),
+                saqp,
+                csm,
+            )
+
+    def test_overlong_citation_source_rejected(self):
+        saqp, csm = _artifacts()
+        with pytest.raises(ProposalRejected):
+            validate_candidate(
+                _grid_candidate(citations=[{"source": "x" * 201}]), saqp, csm
+            )
+
+
+class TestParseLlmProposals:
+    def test_object_with_proposals_key(self):
+        assert parse_llm_proposals(json.dumps({"proposals": [{"a": 1}]})) == [{"a": 1}]
+
+    def test_top_level_list(self):
+        assert parse_llm_proposals(json.dumps([{"a": 1}])) == [{"a": 1}]
+
+    @pytest.mark.parametrize("raw", ["not json", "{}", '{"proposals": "x"}', "", None])
+    def test_garbage_yields_empty(self, raw):
+        assert parse_llm_proposals(raw) == []
+
+
+class TestBuildProposalsPrompt:
+    def test_prompt_lists_targets_and_blocks(self):
+        ctx = ProposalContext.model_validate(_proposal_context_dict())
+        saqp, csm = extract_artifacts(ctx)
+        prompt = build_proposals_prompt(
+            "Is coverage sufficient?", "The answer.", "SITE", "KB", ctx, saqp, csm
+        )
+        assert 'id="pt-1"' in prompt
+        assert 'id="smp-1"' in prompt
+        assert 'id="l1"' in prompt
+        assert "origin=generated" in prompt
+        assert "Groundwater, Soil" in prompt
+        assert "Is coverage sufficient?" in prompt
+        assert "The answer." in prompt
+
+    def test_prompt_omits_unqualified_artifact(self):
+        payload = _proposal_context_dict()
+        del payload["csm"]["updatedAt"]
+        ctx = ProposalContext.model_validate(payload)
+        saqp, csm = extract_artifacts(ctx)
+        prompt = build_proposals_prompt("q", "a", "s", "k", ctx, saqp, csm)
+        assert csm is None
+        assert 'id="l1"' not in prompt
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+class TestGenerateProposals:
+    def test_happy_path(self):
+        ctx = ProposalContext.model_validate(_proposal_context_dict())
+
+        async def complete(system_prompt, prompt):
+            return json.dumps({"proposals": [_grid_candidate()]})
+
+        result = _run(generate_proposals("q", "a", "site", "kb", ctx, complete))
+        assert len(result) == 1
+        assert result[0]["operation"] == "saqp.set_grid_parameters"
+
+    def test_invalid_candidates_dropped_valid_kept(self):
+        ctx = ProposalContext.model_validate(_proposal_context_dict())
+
+        async def complete(system_prompt, prompt):
+            return json.dumps(
+                {
+                    "proposals": [
+                        _grid_candidate(operation="saqp.delete_point"),
+                        _grid_candidate(),
+                        "not even an object",
+                    ]
+                }
+            )
+
+        result = _run(generate_proposals("q", "a", "site", "kb", ctx, complete))
+        assert len(result) == 1
+
+    def test_cap_at_three(self):
+        ctx = ProposalContext.model_validate(_proposal_context_dict())
+
+        async def complete(system_prompt, prompt):
+            return json.dumps({"proposals": [_grid_candidate() for _ in range(6)]})
+
+        result = _run(generate_proposals("q", "a", "site", "kb", ctx, complete))
+        assert len(result) == MAX_PROPOSALS_PER_ANSWER
+
+    def test_completion_failure_yields_empty(self):
+        ctx = ProposalContext.model_validate(_proposal_context_dict())
+
+        async def complete(system_prompt, prompt):
+            raise RuntimeError("upstream down")
+
+        result = _run(generate_proposals("q", "a", "site", "kb", ctx, complete))
+        assert result == []
+
+    def test_no_qualified_artifacts_skips_completion(self):
+        ctx = ProposalContext.model_validate({"saqp": {"planId": "plan-1"}})
+        calls = []
+
+        async def complete(system_prompt, prompt):
+            calls.append(1)
+            return "{}"
+
+        result = _run(generate_proposals("q", "a", "site", "kb", ctx, complete))
+        assert result == []
+        assert calls == []
