@@ -190,26 +190,26 @@ def extract_artifacts(
         raw_saqp
         and isinstance(raw_saqp.planId, str)
         and raw_saqp.planId.strip()
-        and isinstance(raw_saqp.updatedAt, str)
-        and raw_saqp.updatedAt.strip()
+        and isinstance(raw_saqp.planUpdatedAt, str)
+        and raw_saqp.planUpdatedAt.strip()
     ):
         saqp = SaqpArtifact(
             plan_id=raw_saqp.planId.strip(),
-            updated_at=raw_saqp.updatedAt.strip(),
+            updated_at=raw_saqp.planUpdatedAt.strip(),
             point_ids=_ref_ids(raw_saqp.points),
             sample_ids=_ref_ids(raw_saqp.samples),
         )
     raw_csm = ctx.csm
     if (
         raw_csm
-        and isinstance(raw_csm.id, str)
-        and raw_csm.id.strip()
-        and isinstance(raw_csm.updatedAt, str)
-        and raw_csm.updatedAt.strip()
+        and isinstance(raw_csm.csmId, str)
+        and raw_csm.csmId.strip()
+        and isinstance(raw_csm.csmUpdatedAt, str)
+        and raw_csm.csmUpdatedAt.strip()
     ):
         csm = CsmArtifact(
-            csm_id=raw_csm.id.strip(),
-            updated_at=raw_csm.updatedAt.strip(),
+            csm_id=raw_csm.csmId.strip(),
+            updated_at=raw_csm.csmUpdatedAt.strip(),
             source_ids=_ref_ids(raw_csm.sources),
             pathway_ids=_ref_ids(raw_csm.pathways),
             receptor_ids=_ref_ids(raw_csm.receptors),

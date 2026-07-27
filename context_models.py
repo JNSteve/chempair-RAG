@@ -266,7 +266,7 @@ class ProposalSaqpContext(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     planId: Optional[str] = None
-    updatedAt: Optional[str] = None
+    planUpdatedAt: Optional[str] = None
     points: Optional[List[ProposalEntityRef]] = None
     samples: Optional[List[ProposalEntityRef]] = None
 
@@ -274,8 +274,8 @@ class ProposalSaqpContext(BaseModel):
 class ProposalCsmContext(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    id: Optional[str] = None
-    updatedAt: Optional[str] = None
+    csmId: Optional[str] = None
+    csmUpdatedAt: Optional[str] = None
     sources: Optional[List[ProposalEntityRef]] = None
     pathways: Optional[List[ProposalEntityRef]] = None
     receptors: Optional[List[ProposalEntityRef]] = None
