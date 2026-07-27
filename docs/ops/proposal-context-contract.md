@@ -9,13 +9,13 @@ send exactly these):
 "proposalContext": {
   "saqp": {
     "planId": "<saqp_plans.id>",
-    "updatedAt": "<plan updated_at, echoed verbatim into baseline>",
+    "planUpdatedAt": "<plan updated_at, echoed verbatim into baseline>",
     "points":  [{ "id": "<saqp_points.id>", "label": "SP01" }],
     "samples": [{ "id": "<sample id>", "label": "BH01_0.5" }]
   },
   "csm": {
-    "id": "<CSM id>",
-    "updatedAt": "<CSM updatedAt, echoed verbatim into baseline>",
+    "csmId": "<CSM id>",
+    "csmUpdatedAt": "<CSM updatedAt, echoed verbatim into baseline>",
     "sources":   [{ "id": "s1", "label": "Former UST" }],
     "pathways":  [{ "id": "p1", "label": "Leaching" }],
     "receptors": [{ "id": "r1", "label": "Groundwater users" }],
@@ -27,8 +27,13 @@ send exactly these):
 
 Rules:
 
-- An artifact (saqp / csm) only participates if BOTH its id and updatedAt
-  are non-empty strings — they become the proposal `baseline` verbatim.
+- An artifact only participates if BOTH its id and updatedAt fields
+  (`planId`+`planUpdatedAt` / `csmId`+`csmUpdatedAt`) are non-empty
+  strings — they become the proposal `baseline` verbatim.
+- These names match the frontend sender (`src/lib/alfieProposals/
+  proposalChatContext.ts`, enviro-sage PR #615) and §4 of the final brief
+  (2026-07-27-railway-rag-proposals-contract.md). The frontend is the
+  source of truth if they ever diverge again.
 - `label` is display-only context for the model; `origin` on linkages is
   "generated" or "consultant" (the model avoids consultant-authored ones).
 - Ids are the only values the model may reference; anything else is

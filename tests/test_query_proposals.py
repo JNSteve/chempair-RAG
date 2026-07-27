@@ -18,7 +18,7 @@ def _context_with_proposals() -> dict:
         "proposalContext": {
             "saqp": {
                 "planId": "plan-1",
-                "updatedAt": "2026-07-27T00:00:00.000Z",
+                "planUpdatedAt": "2026-07-27T00:00:00.000Z",
                 "points": [{"id": "pt-1", "label": "SP01"}],
                 "samples": [{"id": "smp-1", "label": "BH01_0.5"}],
             }

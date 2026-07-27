@@ -29,13 +29,13 @@ def _proposal_context_dict() -> dict:
     return {
         "saqp": {
             "planId": "plan-1",
-            "updatedAt": "2026-07-27T00:00:00.000Z",
+            "planUpdatedAt": "2026-07-27T00:00:00.000Z",
             "points": [{"id": "pt-1", "label": "SP01"}],
             "samples": [{"id": "smp-1", "label": "BH01_0.5"}],
         },
         "csm": {
-            "id": "csm-1",
-            "updatedAt": "2026-07-27T01:00:00.000Z",
+            "csmId": "csm-1",
+            "csmUpdatedAt": "2026-07-27T01:00:00.000Z",
             "sources": [{"id": "s1", "label": "Former UST"}],
             "pathways": [{"id": "p1", "label": "Leaching"}],
             "receptors": [{"id": "r1", "label": "Groundwater users"}],
@@ -84,7 +84,7 @@ class TestExtractArtifacts:
 
     def test_artifact_without_updated_at_is_dropped(self):
         payload = _proposal_context_dict()
-        del payload["saqp"]["updatedAt"]
+        del payload["saqp"]["planUpdatedAt"]
         saqp, csm = extract_artifacts(ProposalContext.model_validate(payload))
         assert saqp is None
         assert csm is not None
@@ -447,7 +447,7 @@ class TestBuildProposalsPrompt:
 
     def test_prompt_omits_unqualified_artifact(self):
         payload = _proposal_context_dict()
-        del payload["csm"]["updatedAt"]
+        del payload["csm"]["csmUpdatedAt"]
         ctx = ProposalContext.model_validate(payload)
         saqp, csm = extract_artifacts(ctx)
         prompt = build_proposals_prompt("q", "a", "s", "k", ctx, saqp, csm)
