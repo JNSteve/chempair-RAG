@@ -35,6 +35,7 @@ from upstream_errors import classify_upstream_error
 from lightrag.base import QueryParam
 from lightrag.llm.openai import openai_complete_if_cache
 from lightrag.utils import EmbeddingFunc
+from proposals import generate_proposals
 from query_normalization import normalise_text as normalise_query_text
 from raganything import RAGAnything, RAGAnythingConfig
 
@@ -374,6 +375,9 @@ class QueryResponse(BaseModel):
     citations: list[Citation]
     sections: ResponseSections
     debug: DebugMetadata
+    # Structured edit proposals (enviro-sage PR #612 contract). Empty list
+    # means none — old frontends ignore the key entirely.
+    proposals: list[dict] = Field(default_factory=list)
 
 
 def _has_usable_context(ctx: WorkspaceContext) -> bool:
@@ -607,6 +611,24 @@ async def _complete_unified_answer(prompt: str, map_image: str | None) -> str:
     return response.choices[0].message.content or ""
 
 
+async def _complete_proposals_json(system_prompt: str, prompt: str) -> str:
+    """Proposal call: JSON-mode chat completion. Separate from the answer
+    call so a proposal failure can never affect the answer, and patchable
+    in tests."""
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    response = await client.chat.completions.create(
+        model=LLM_MODEL,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    return response.choices[0].message.content or ""
+
+
 async def _fetch_rag_citations(query: str, mode: str) -> list[dict]:
     lightrag = getattr(rag, "lightrag", None)
     if lightrag is None or not hasattr(lightrag, "aquery_data"):
@@ -633,6 +655,7 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
     sections = ResponseSections()
     debug = DebugMetadata()
     debug.retrieval_mode = req.mode
+    proposals_payload: list[dict] = []
 
     if req.context is not None:
         try:
@@ -714,16 +737,39 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
             debug.citation_sources = [citation["source"] for citation in citations]
             grounded = bool(citations)
 
+            site_block = build_grounding_prompt(req.context)
             result = await _complete_unified_answer(
                 _build_unified_prompt(
                     effective_question,
-                    build_grounding_prompt(req.context),
+                    site_block,
                     kb_evidence,
                     has_map_image=map_image is not None,
                     conversation_block=_render_conversation(req.context),
                 ),
                 map_image,
             )
+
+            # Flag-gated second call; every failure degrades to no
+            # proposals. RAG_ENABLE_PROPOSALS ships off until the frontend
+            # is ready to render proposal cards.
+            if (
+                _env_flag("RAG_ENABLE_PROPOSALS", False)
+                and req.context.proposalContext is not None
+            ):
+                proposals_payload = await generate_proposals(
+                    effective_question,
+                    result,
+                    site_block,
+                    kb_evidence,
+                    req.context.proposalContext,
+                    _complete_proposals_json,
+                )
+                if proposals_payload:
+                    logger.info(
+                        "proposals_emitted count=%d session=%s",
+                        len(proposals_payload),
+                        session_id,
+                    )
         else:
             route_used = "regulatory_only"
             debug.kb_query = effective_question
@@ -767,6 +813,7 @@ async def query(req: QueryRequest, _auth: None = Depends(require_rag_auth)):
             citations=citations,
             sections=sections,
             debug=debug,
+            proposals=proposals_payload,
         )
     except HTTPException:
         raise
