@@ -149,9 +149,16 @@ UNIFIED_ANSWER_SYSTEM = (
     "project.\n\n"
     "Each question arrives with two evidence blocks:\n"
     "1. SITE DATA — the live state of the consultant's project, computed by the "
-    "application: lab results, applied criteria and thresholds, exceedances, map "
-    "figures (contour areas, exceedance zones, hotspots, estimated contaminated "
-    "volume and mass), sampling-plan (SAQP) sufficiency, and field data. These "
+    "application: lab results, applied criteria and thresholds, exceedances, "
+    "UCL95 statistics (95% upper confidence limits of the mean, with method, "
+    "sample count, and criterion comparison), criteria coverage (which "
+    "analytes have NO applicable criterion and so are not being screened), "
+    "detection frequency, QA/QC summary (duplicate RPD failures, blank "
+    "detections), the sampling program (rounds and dates), map figures "
+    "(contour areas, exceedance zones, hotspots, estimated contaminated "
+    "volume and mass), sampling-plan (SAQP) sufficiency and planned points, "
+    "field data including groundwater observations, and the consultant's "
+    "draft conceptual site model (CSM). These "
     "figures are authoritative — quote them exactly, with their units. Map and "
     "sampling-plan figures belong to the analyte or plan they are labelled with.\n"
     "2. KNOWLEDGE BASE EVIDENCE — passages retrieved from Australian regulatory "
@@ -190,6 +197,15 @@ UNIFIED_ANSWER_SYSTEM = (
     "- If something the question needs is in neither block, say plainly what is "
     "missing. You may still explain the general approach, clearly framed as "
     "general practice rather than a site-specific figure.\n"
+    "- The sample rows in SITE DATA are a relevance-selected subset, not the "
+    "full results table (the row count vs total samples is stated when they "
+    "differ). Never present the subset as a complete listing. When a question "
+    "asks you to enumerate results beyond what is attached ('which samples "
+    "came from below 1 m', 'list every lead result'), answer from the rows "
+    "you have, say explicitly that this is a partial view of the N total "
+    "samples, remind the consultant the full set is in their analysis table "
+    "in the workspace, and offer to answer for a specific sample, analyte, "
+    "or area instead. Never guess at rows you cannot see.\n"
     "- Keep media and pathways distinct (soil vs soil vapour vs groundwater); "
     "never substitute a threshold from a different medium, depth band, or land "
     "use.\n"
@@ -201,7 +217,17 @@ UNIFIED_ANSWER_SYSTEM = (
     "- Evidence passages or citations marked SUPERSEDED are historical context "
     "only: never present their values or requirements as current, and point to "
     "the named replacement when one is shown.\n"
-    "- Never mention RAG, LLM, AI, prompts, retrieval, or internal routing.\n\n"
+    "- Never mention RAG, LLM, AI, prompts, retrieval, or internal routing.\n"
+    "- The Conceptual Site Model block is the consultant's own draft working "
+    "model, not measured data or regulation: treat its sources, pathways, "
+    "receptors, and history as professional context, flag where the measured "
+    "results support or contradict it, and use its stated data gaps when "
+    "recommending next steps.\n"
+    "- When a question is about visible site features (structures, "
+    "stockpiles, surroundings, land use) and no MAP SNAPSHOT is attached, "
+    "answer what the site data supports, then suggest asking again from the "
+    "site map view, where you can see the aerial imagery with labelled "
+    "sample points. Never describe site features you cannot see.\n\n"
     "Map snapshot rules (when an image is attached):\n"
     "- Visual observations are interpretive, never authoritative. Frame them as "
     "observations ('appears to be a shed', 'a pale mound that may be a "
@@ -433,10 +459,33 @@ def _context_blocks_present(ctx: WorkspaceContext) -> list[str]:
     )
 
 
+# Full names case-insensitive; abbreviations must be uppercase words so
+# "act"/"wa"/"sa"/"nt" in prose don't false-positive.
+EXPLICIT_STATE_NAME_PATTERN = re.compile(
+    r"\b(?:new south wales|queensland|victoria|tasmania|western australia"
+    r"|south australia|northern territory|australian capital territory)\b",
+    re.IGNORECASE,
+)
+EXPLICIT_STATE_ABBREV_PATTERN = re.compile(r"\b(?:NSW|QLD|VIC|TAS|WA|SA|NT|ACT)\b")
+
+
+def _question_names_jurisdiction(question: str) -> bool:
+    return bool(
+        EXPLICIT_STATE_NAME_PATTERN.search(question)
+        or EXPLICIT_STATE_ABBREV_PATTERN.search(question)
+    )
+
+
 def _build_retrieval_query(question: str, ctx: WorkspaceContext) -> str:
     """The question drives retrieval; the project's regulatory frame is appended
     as a hint so the right guideline family surfaces. This is a retrieval aid,
     not routing — the answer model always sees the untouched question."""
+    # An explicit jurisdiction in the question outranks the project's
+    # default frame: "how do I classify soil for disposal in NSW?" on a
+    # QLD/NEPM-framed project must retrieve the NSW waste guideline, not
+    # be steered back to the project's screening criteria family.
+    if _question_names_jurisdiction(question):
+        return question
     hints: list[str] = []
     project_state = ctx.projectState
     selected = project_state.selectedCriteria if project_state else None

@@ -325,6 +325,10 @@ def test_injection_question_keeps_grounding_rules_and_real_citations(client):
         in mock_openai.await_args.kwargs["system_prompt"]
     )
     assert "Never supply figures from memory" in server.UNIFIED_ANSWER_SYSTEM
+    # Enumeration questions must acknowledge the row subset, point to the
+    # workspace analysis table, and offer to narrow — never fake completeness.
+    assert "relevance-selected subset" in server.UNIFIED_ANSWER_SYSTEM
+    assert "analysis table" in server.UNIFIED_ANSWER_SYSTEM
 
 
 def test_arsenic_sources_question_blends_site_and_kb_evidence_in_one_call(client):

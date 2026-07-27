@@ -926,6 +926,36 @@ class TestUnifiedAnswering:
         assert "what soil sampling density do i need?" in retrieval_query
         assert "NEPM 2013 HIL-A" in retrieval_query
 
+    def test_explicit_jurisdiction_drops_the_project_frame(self, client):
+        # Field report: "classify excavated soil for off-site disposal in
+        # NSW?" on a NEPM-framed project retrieved NEPM volumes instead of
+        # the NSW waste guideline — the appended frame outweighed the
+        # question's own jurisdiction. An explicit state wins.
+        test_client, _, mock_rag, _ = client
+
+        self._post(
+            test_client,
+            "how do I classify excavated soil for off-site disposal in NSW?",
+            _full_context(),
+        )
+
+        retrieval_query = mock_rag.lightrag.aquery_data.await_args.args[0]
+        assert retrieval_query == (
+            "how do I classify excavated soil for off-site disposal in NSW?"
+        )
+        assert "regulatory frame" not in retrieval_query
+
+    def test_lowercase_state_words_do_not_drop_the_frame(self, client):
+        # "act" the verb must not read as the ACT jurisdiction.
+        test_client, _, mock_rag, _ = client
+
+        self._post(
+            test_client, "how should the epa act on these results?", _full_context()
+        )
+
+        retrieval_query = mock_rag.lightrag.aquery_data.await_args.args[0]
+        assert "NEPM 2013 HIL-A" in retrieval_query
+
     def test_citations_come_from_the_same_retrieval_the_model_saw(self, client):
         test_client, _, _, _ = client
 
@@ -1421,6 +1451,229 @@ class TestBuildGroundingPrompt:
         assert "## Retrieval Context" in prompt
         assert "Matched analytes: Lead" in prompt
         assert "Retrieved rows: 1" in prompt
+
+    def test_retrieved_rows_flagged_as_subset_of_total_samples(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext(
+                projectState=ProjectState(
+                    project=ProjectInfo(projectName="Ducat", totalSamples=300),
+                ),
+                retrievalContext=RetrievalContext(
+                    retrievedRows=[
+                        ProjectResultRow(sampleCode="BH-01"),
+                        ProjectResultRow(sampleCode="BH-02"),
+                    ],
+                ),
+            )
+        )
+
+        assert "Retrieved rows: 2 of 300 total samples" in prompt
+        assert "NOT the complete results table" in prompt
+
+    def test_retrieved_rows_not_flagged_when_they_are_the_full_table(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext(
+                projectState=ProjectState(
+                    project=ProjectInfo(projectName="Ducat", totalSamples=1),
+                ),
+                retrievalContext=RetrievalContext(
+                    retrievedRows=[ProjectResultRow(sampleCode="BH-01")],
+                ),
+            )
+        )
+
+        assert "Retrieved rows: 1" in prompt
+        assert "NOT the complete results table" not in prompt
+
+    def test_exceedance_list_flagged_as_subset_of_total(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext(
+                projectState=ProjectState(
+                    exceedanceSummary=ExceedanceSummary(totalExceedances=22),
+                    exceedances=[
+                        Exceedance(
+                            analyte="Arsenic",
+                            sampleCode="BH20",
+                            value=870,
+                            criterion="HIL-A",
+                            unit="mg/kg",
+                        )
+                    ],
+                )
+            )
+        )
+
+        assert "showing the 1 largest of 22 exceedances" in prompt
+
+    def test_ucl_summary_renders_with_method_and_criterion_verdict(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext.model_validate(
+                {
+                    "projectState": {
+                        "uclSummary": [
+                            {
+                                "analyte": "Arsenic",
+                                "sampleCount": 24,
+                                "mean": 96.2,
+                                "ucl95": 143.8,
+                                "method": "95% H-UCL (lognormal)",
+                                "unit": "mg/kg",
+                                "criterionValue": 100,
+                                "exceedsCriteria": True,
+                                "maxDetected": 870,
+                            },
+                            {
+                                "analyte": "Lead",
+                                "sampleCount": 5,
+                                "ucl95": 40.1,
+                                "method": "Student's t-statistic",
+                                "criterionValue": 300,
+                                "exceedsCriteria": False,
+                                "isReliable": False,
+                                "reliabilityWarning": "n < 8",
+                            },
+                        ]
+                    }
+                }
+            )
+        )
+
+        assert "## UCL95 Statistics" in prompt
+        assert (
+            "- Arsenic: 95% UCL = 143.8 mg/kg (95% H-UCL (lognormal), n=24, "
+            "mean 96.2 mg/kg, max 870 mg/kg) — EXCEEDS criterion 100 mg/kg" in prompt
+        )
+        assert "- Lead: 95% UCL = 40.1" in prompt
+        assert "below criterion 300" in prompt
+        assert "[caution: n < 8]" in prompt
+
+    def test_context_v6_analysis_blocks_render(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext.model_validate(
+                {
+                    "schemaVersion": 6,
+                    "projectState": {
+                        "criteriaCoverage": {
+                            "scopeLabel": "NEPM 2013 HIL-A",
+                            "coveredCount": 25,
+                            "notCoveredCount": 15,
+                            "excludedCount": 2,
+                            "notCoveredAnalytes": ["Boron", "Vanadium"],
+                            "excludedAnalytes": ["Moisture"],
+                        },
+                        "detectionStats": [
+                            {
+                                "analyte": "PFOS",
+                                "detectionCount": 4,
+                                "totalSamples": 62,
+                                "detectionRatePct": 6.5,
+                            }
+                        ],
+                        "qaqc": {
+                            "duplicatePairCount": 3,
+                            "rpdFailures": 1,
+                            "blankSampleCount": 2,
+                            "blankDetections": 0,
+                            "findings": ["Arsenic RPD 41% at TP04/QC101"],
+                        },
+                        "samplingProgram": {
+                            "rounds": ["Round 1", "Round 2"],
+                            "sampleTypes": ["soil"],
+                            "earliestDate": "2025-10-15",
+                            "latestDate": "2026-02-03",
+                        },
+                    },
+                }
+            )
+        )
+
+        assert "## Criteria Coverage" in prompt
+        assert "15 with NO applicable criterion" in prompt
+        assert "Not screened (no criterion applied): Boron, Vanadium" in prompt
+        assert "## Detection Frequency" in prompt
+        assert "- PFOS: detected in 4/62 samples (6.5%)" in prompt
+        assert "## QA/QC Summary" in prompt
+        assert "RPD failures: 1" in prompt
+        assert "- Arsenic RPD 41% at TP04/QC101" in prompt
+        assert "## Sampling Program" in prompt
+        assert "Sampling dates: 2025-10-15 to 2026-02-03" in prompt
+
+    def test_saqp_points_and_groundwater_and_csm_render(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext.model_validate(
+                {
+                    "schemaVersion": 6,
+                    "saqpContext": {
+                        "planStatus": "approved",
+                        "plannedPoints": 9,
+                        "points": [
+                            {
+                                "name": "SP01",
+                                "depthFromM": 0,
+                                "depthToM": 0.5,
+                                "priority": "high",
+                                "executionStatus": "planned",
+                                "notes": "step-out on arsenic hotspot",
+                            }
+                        ],
+                        "pointsTruncated": True,
+                    },
+                    "fieldContext": {
+                        "boreholes": [
+                            {
+                                "boreholeId": "BH01",
+                                "totalDepthM": 2,
+                                "waterFirstStrikeM": 1.2,
+                                "waterStandingM": 0.9,
+                                "groundwaterNotes": "slight sheen observed",
+                            }
+                        ]
+                    },
+                    "csmContext": {
+                        "summary": "Former service station with shallow fill.",
+                        "contaminantsOfConcern": ["TRH", "Benzene"],
+                        "sources": ["UPSS"],
+                        "pathways": ["leaching to groundwater"],
+                        "receptors": ["residential neighbours"],
+                        "linkages": [
+                            {
+                                "source": "UPSS",
+                                "pathway": "vapour intrusion",
+                                "receptor": "future residents",
+                                "status": "potentially complete",
+                            }
+                        ],
+                        "dataGaps": ["no groundwater wells downgradient"],
+                    },
+                }
+            )
+        )
+
+        assert (
+            "- SP01 (0-0.5 m) [high, planned] — step-out on arsenic hotspot" in prompt
+        )
+        assert "(planned point list truncated — not all points shown)" in prompt
+        assert "water first strike 1.2 m" in prompt
+        assert "standing water 0.9 m" in prompt
+        assert "groundwater: slight sheen observed" in prompt
+        assert "## Conceptual Site Model (consultant's draft)" in prompt
+        assert (
+            "- UPSS -> vapour intrusion -> future residents [potentially complete]"
+            in prompt
+        )
+        assert "Data gaps: no groundwater wells downgradient" in prompt
+
+    def test_project_results_flagged_as_subset_of_total_samples(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext(
+                projectState=ProjectState(
+                    project=ProjectInfo(projectName="Ducat", totalSamples=62),
+                    projectResults=[ProjectResultRow(sampleCode="BH-01")],
+                )
+            )
+        )
+
+        assert "a relevance-selected 1 of 62 total samples" in prompt
 
 
 class TestContextModelValidation:

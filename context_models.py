@@ -200,6 +200,18 @@ class MapContext(BaseModel):
     capturedAtIso: Optional[str] = None
 
 
+class SaqpPoint(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    name: Optional[str] = None
+    depthFromM: Optional[float] = None
+    depthToM: Optional[float] = None
+    priority: Optional[str] = None
+    matrix: Optional[str] = None
+    executionStatus: Optional[str] = None
+    notes: Optional[str] = None
+
+
 class SaqpContext(BaseModel):
     """Summary of the project's sampling plan (SAQP) and its sufficiency
     advisory (schema v5, optional). All figures are computed by the app's
@@ -207,6 +219,8 @@ class SaqpContext(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    points: Optional[List[SaqpPoint]] = None
+    pointsTruncated: Optional[bool] = None
     planStatus: Optional[str] = None
     sufficiencyStatus: Optional[str] = None
     computedStatus: Optional[str] = None
@@ -310,6 +324,9 @@ class BoreholeLog(BaseModel):
     boreholeId: Optional[str] = None
     totalDepthM: Optional[float] = None
     groundwaterDepthM: Optional[float] = None
+    waterFirstStrikeM: Optional[float] = None
+    waterStandingM: Optional[float] = None
+    groundwaterNotes: Optional[str] = None
     drillingMethod: Optional[str] = None
     lithology: Optional[List[BoreholeLithologyInterval]] = None
     samples: Optional[List[BoreholeFieldSample]] = None
@@ -331,6 +348,91 @@ class FieldContext(BaseModel):
     truncated: Optional[bool] = None
 
 
+class CriteriaCoverage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    scopeLabel: Optional[str] = None
+    coveredCount: Optional[int] = None
+    notCoveredCount: Optional[int] = None
+    excludedCount: Optional[int] = None
+    matchRatePct: Optional[float] = None
+    notCoveredAnalytes: Optional[List[str]] = None
+    excludedAnalytes: Optional[List[str]] = None
+
+
+class DetectionStat(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    analyte: Optional[str] = None
+    detectionCount: Optional[int] = None
+    totalSamples: Optional[int] = None
+    detectionRatePct: Optional[float] = None
+
+
+class QaQcSummary(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    duplicatePairCount: Optional[int] = None
+    rpdFailures: Optional[int] = None
+    blankDetections: Optional[int] = None
+    blankSampleCount: Optional[int] = None
+    unpairedDuplicates: Optional[int] = None
+    findings: Optional[List[str]] = None
+
+
+class SamplingProgram(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    rounds: Optional[List[str]] = None
+    sampleTypes: Optional[List[str]] = None
+    earliestDate: Optional[str] = None
+    latestDate: Optional[str] = None
+
+
+class CsmLinkage(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    source: Optional[str] = None
+    pathway: Optional[str] = None
+    receptor: Optional[str] = None
+    status: Optional[str] = None
+
+
+class CsmContext(BaseModel):
+    """Trimmed summary of the consultant's draft conceptual site model
+    (schema v6, optional). The consultant's own working model — site
+    context, not regulatory evidence."""
+
+    model_config = ConfigDict(extra="allow")
+
+    summary: Optional[str] = None
+    landUse: Optional[str] = None
+    siteHistory: Optional[str] = None
+    contaminantsOfConcern: Optional[List[str]] = None
+    sources: Optional[List[str]] = None
+    pathways: Optional[List[str]] = None
+    receptors: Optional[List[str]] = None
+    linkages: Optional[List[CsmLinkage]] = None
+    dataGaps: Optional[List[str]] = None
+
+
+class UclEntry(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    analyte: Optional[str] = None
+    sampleCount: Optional[int] = None
+    mean: Optional[float] = None
+    ucl95: Optional[float] = None
+    method: Optional[str] = None
+    distribution: Optional[str] = None
+    unit: Optional[str] = None
+    criterionValue: Optional[float] = None
+    exceedsCriteria: Optional[bool] = None
+    maxDetected: Optional[float] = None
+    isReliable: Optional[bool] = None
+    reliabilityWarning: Optional[str] = None
+
+
 class ProjectState(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -341,6 +443,11 @@ class ProjectState(BaseModel):
     exceedances: Optional[List[Exceedance]] = None
     projectResults: Optional[List[ProjectResultRow]] = None
     fieldSummary: Optional[FieldSummary] = None
+    uclSummary: Optional[List[UclEntry]] = None
+    criteriaCoverage: Optional[CriteriaCoverage] = None
+    detectionStats: Optional[List[DetectionStat]] = None
+    qaqc: Optional[QaQcSummary] = None
+    samplingProgram: Optional[SamplingProgram] = None
 
 
 class ProjectEvidenceSummary(BaseModel):
@@ -394,6 +501,7 @@ class WorkspaceContext(BaseModel):
     mapContext: Optional[MapContext] = None
     saqpContext: Optional[SaqpContext] = None
     fieldContext: Optional[FieldContext] = None
+    csmContext: Optional[CsmContext] = None
     proposalContext: Optional[ProposalContext] = None
     conversation: Optional[List[ConversationMessage]] = Field(
         default=None, max_length=MAX_CONVERSATION_MESSAGES
@@ -606,7 +714,126 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                     row += f" against {ex.criterion}"
                 rows.append(row)
         if rows:
+            total = (
+                project_state.exceedanceSummary.totalExceedances
+                if project_state.exceedanceSummary
+                else None
+            )
+            if total and total > len(rows):
+                rows.append(
+                    f"(showing the {len(rows)} largest of {total} exceedances "
+                    "— not the full list)"
+                )
             sections.append("## Exceedances\n" + "\n".join(rows))
+
+    if project_state and project_state.uclSummary:
+        rows = []
+        for entry in project_state.uclSummary:
+            if not entry.analyte or entry.ucl95 is None:
+                continue
+            unit = f" {entry.unit}" if entry.unit else ""
+            line = f"- {entry.analyte}: 95% UCL = {entry.ucl95:g}{unit}"
+            details = []
+            if entry.method:
+                details.append(entry.method)
+            if entry.sampleCount is not None:
+                details.append(f"n={entry.sampleCount}")
+            if entry.mean is not None:
+                details.append(f"mean {entry.mean:g}{unit}")
+            if entry.maxDetected is not None:
+                details.append(f"max {entry.maxDetected:g}{unit}")
+            if details:
+                line += f" ({', '.join(details)})"
+            if entry.criterionValue is not None:
+                verdict = (
+                    "EXCEEDS"
+                    if entry.exceedsCriteria
+                    else "below"
+                    if entry.exceedsCriteria is not None
+                    else "vs"
+                )
+                line += f" — {verdict} criterion {entry.criterionValue:g}{unit}"
+            if entry.isReliable is False and entry.reliabilityWarning:
+                line += f" [caution: {entry.reliabilityWarning}]"
+            rows.append(line)
+        if rows:
+            sections.append("## UCL95 Statistics\n" + "\n".join(rows))
+
+    if project_state and project_state.criteriaCoverage:
+        c = project_state.criteriaCoverage
+        parts = []
+        if c.scopeLabel:
+            parts.append(f"Scope: {c.scopeLabel}")
+        counts = []
+        if c.coveredCount is not None:
+            counts.append(f"{c.coveredCount} covered")
+        if c.notCoveredCount is not None:
+            counts.append(f"{c.notCoveredCount} with NO applicable criterion")
+        if c.excludedCount is not None and c.excludedCount:
+            counts.append(f"{c.excludedCount} excluded")
+        if counts:
+            parts.append("Analytes: " + ", ".join(counts))
+        if c.notCoveredAnalytes:
+            parts.append(
+                "Not screened (no criterion applied): "
+                + ", ".join(c.notCoveredAnalytes)
+            )
+        if c.excludedAnalytes:
+            parts.append("Excluded from matching: " + ", ".join(c.excludedAnalytes))
+        if parts:
+            sections.append("## Criteria Coverage\n" + "\n".join(parts))
+
+    if project_state and project_state.detectionStats:
+        rows = []
+        for stat in project_state.detectionStats:
+            if not stat.analyte:
+                continue
+            line = f"- {stat.analyte}"
+            if stat.detectionCount is not None and stat.totalSamples is not None:
+                line += (
+                    f": detected in {stat.detectionCount}/{stat.totalSamples} samples"
+                )
+            if stat.detectionRatePct is not None:
+                line += f" ({stat.detectionRatePct:g}%)"
+            rows.append(line)
+        if rows:
+            sections.append(
+                "## Detection Frequency (partially detected analytes)\n"
+                + "\n".join(rows)
+            )
+
+    if project_state and project_state.qaqc:
+        q = project_state.qaqc
+        parts = []
+        if q.duplicatePairCount is not None:
+            parts.append(f"Duplicate pairs assessed: {q.duplicatePairCount}")
+        if q.rpdFailures is not None:
+            parts.append(f"RPD failures: {q.rpdFailures}")
+        if q.blankSampleCount is not None:
+            blanks = f"Blank samples: {q.blankSampleCount}"
+            if q.blankDetections is not None:
+                blanks += f" ({q.blankDetections} with detections)"
+            parts.append(blanks)
+        if q.unpairedDuplicates:
+            parts.append(f"Unpaired duplicates: {q.unpairedDuplicates}")
+        for finding in q.findings or []:
+            parts.append(f"- {finding}")
+        if parts:
+            sections.append("## QA/QC Summary\n" + "\n".join(parts))
+
+    if project_state and project_state.samplingProgram:
+        sp = project_state.samplingProgram
+        parts = []
+        if sp.rounds:
+            parts.append(f"Sampling rounds: {', '.join(sp.rounds)}")
+        if sp.sampleTypes:
+            parts.append(f"Sample types: {', '.join(sp.sampleTypes)}")
+        if sp.earliestDate and sp.latestDate:
+            parts.append(f"Sampling dates: {sp.earliestDate} to {sp.latestDate}")
+        elif sp.earliestDate or sp.latestDate:
+            parts.append(f"Sampling date: {sp.earliestDate or sp.latestDate}")
+        if parts:
+            sections.append("## Sampling Program\n" + "\n".join(parts))
 
     if project_state and project_state.projectResults:
         rows = []
@@ -628,6 +855,14 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                     row += ": " + ", ".join(vals)
                 rows.append(row)
         if rows:
+            total_samples = (
+                project_state.project.totalSamples if project_state.project else None
+            )
+            if total_samples and total_samples > len(rows):
+                rows.append(
+                    f"(a relevance-selected {len(rows)} of {total_samples} total "
+                    "samples — not the complete results table)"
+                )
             sections.append("## Project Results\n" + "\n".join(rows))
 
     if project_state and project_state.fieldSummary:
@@ -724,6 +959,22 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             parts.append(override)
         if s.completedPoints is not None:
             parts.append(f"Field progress: {s.completedPoints} completed")
+        for point in s.points or []:
+            if not point.name:
+                continue
+            line = f"- {point.name}"
+            if point.depthFromM is not None and point.depthToM is not None:
+                line += f" ({point.depthFromM:g}-{point.depthToM:g} m)"
+            details = [
+                d for d in (point.matrix, point.priority, point.executionStatus) if d
+            ]
+            if details:
+                line += f" [{', '.join(details)}]"
+            if point.notes:
+                line += f" — {point.notes}"
+            parts.append(line)
+        if s.pointsTruncated:
+            parts.append("(planned point list truncated — not all points shown)")
         if parts:
             sections.append("## Sampling Plan (SAQP)\n" + "\n".join(parts))
 
@@ -746,12 +997,18 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                 header_bits.append(f"total depth {hole.totalDepthM:g} m")
             if hole.groundwaterDepthM is not None:
                 header_bits.append(f"groundwater {hole.groundwaterDepthM:g} m")
+            if hole.waterFirstStrikeM is not None:
+                header_bits.append(f"water first strike {hole.waterFirstStrikeM:g} m")
+            if hole.waterStandingM is not None:
+                header_bits.append(f"standing water {hole.waterStandingM:g} m")
             if hole.drillingMethod:
                 header_bits.append(hole.drillingMethod)
             header = f"- {hole.boreholeId}"
             if header_bits:
                 header += f" ({', '.join(header_bits)})"
             parts.append(header)
+            if hole.groundwaterNotes:
+                parts.append(f"  groundwater: {hole.groundwaterNotes}")
             for interval in hole.lithology or []:
                 if interval.depthFromM is None or interval.depthToM is None:
                     continue
@@ -797,6 +1054,40 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
         if parts:
             sections.append("## Borehole Logs & Field Data\n" + "\n".join(parts))
 
+    if ctx.csmContext:
+        c = ctx.csmContext
+        parts = []
+        if c.summary:
+            parts.append(c.summary)
+        if c.landUse:
+            parts.append(f"Land use: {c.landUse}")
+        if c.siteHistory:
+            parts.append(f"Site history: {c.siteHistory}")
+        if c.contaminantsOfConcern:
+            parts.append(
+                f"Contaminants of concern: {', '.join(c.contaminantsOfConcern)}"
+            )
+        if c.sources:
+            parts.append(f"Potential sources: {', '.join(c.sources)}")
+        if c.pathways:
+            parts.append(f"Pathways: {', '.join(c.pathways)}")
+        if c.receptors:
+            parts.append(f"Receptors: {', '.join(c.receptors)}")
+        for linkage in c.linkages or []:
+            bits = [b for b in (linkage.source, linkage.pathway, linkage.receptor) if b]
+            if not bits:
+                continue
+            line = "- " + " -> ".join(bits)
+            if linkage.status:
+                line += f" [{linkage.status}]"
+            parts.append(line)
+        if c.dataGaps:
+            parts.append("Data gaps: " + "; ".join(c.dataGaps))
+        if parts:
+            sections.append(
+                "## Conceptual Site Model (consultant's draft)\n" + "\n".join(parts)
+            )
+
     if retrieval_context:
         parts = []
         if retrieval_context.matchedAnalytes:
@@ -808,7 +1099,20 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
                 f"Matched samples: {', '.join(retrieval_context.matchedSampleCodes)}"
             )
         if retrieval_context.retrievedRows:
-            parts.append(f"Retrieved rows: {len(retrieval_context.retrievedRows)}")
+            row_count = len(retrieval_context.retrievedRows)
+            total_samples = (
+                project_state.project.totalSamples
+                if project_state and project_state.project
+                else None
+            )
+            if total_samples and total_samples > row_count:
+                parts.append(
+                    f"Retrieved rows: {row_count} of {total_samples} total "
+                    "samples — a relevance-selected subset, NOT the complete "
+                    "results table."
+                )
+            else:
+                parts.append(f"Retrieved rows: {row_count}")
             # Question-matched sample rows are the most relevant lab evidence —
             # render their values, not just the count.
             for row in retrieval_context.retrievedRows[:30]:
