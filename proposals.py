@@ -172,9 +172,7 @@ def _ref_ids(refs) -> frozenset:
     if not refs:
         return frozenset()
     return frozenset(
-        ref.id.strip()
-        for ref in refs
-        if isinstance(ref.id, str) and ref.id.strip()
+        ref.id.strip() for ref in refs if isinstance(ref.id, str) and ref.id.strip()
     )
 
 
@@ -296,9 +294,7 @@ def _validate_add_targeted_point(payload: dict, saqp: SaqpArtifact) -> dict:
 def _validate_update_point_attributes(payload: dict, saqp: SaqpArtifact) -> dict:
     _exact_keys(
         payload,
-        frozenset(
-            {"pointId", "depthFromM", "depthToM", "matrix", "priority", "notes"}
-        ),
+        frozenset({"pointId", "depthFromM", "depthToM", "matrix", "priority", "notes"}),
         "payload",
     )
     result = {
@@ -385,9 +381,7 @@ def _validate_update_linkage(payload: dict, csm: CsmArtifact) -> dict:
             payload.get("riskLevel"), "payload.riskLevel", RISK_LEVELS
         )
     if payload.get("isComplete") is not None:
-        result["isComplete"] = _as_bool(
-            payload.get("isComplete"), "payload.isComplete"
-        )
+        result["isComplete"] = _as_bool(payload.get("isComplete"), "payload.isComplete")
     notes = _opt_capped_str(payload.get("notes"), "payload.notes", MAX_NOTES_CHARS)
     if notes is not None:
         result["notes"] = notes

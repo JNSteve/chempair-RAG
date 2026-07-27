@@ -2,7 +2,27 @@
 fail-closed validation (mirror of enviro-sage validate.ts @ df5fe84f),
 LLM output parsing, and generation orchestration."""
 
+import asyncio
+import json
+
+import pytest
+
 from context_models import ProposalContext, WorkspaceContext
+from proposals import (
+    MAX_PROPOSALS_PER_ANSWER,
+    ProposalRejected,
+    build_proposals_prompt,
+    extract_artifacts,
+    generate_proposals,
+    parse_llm_proposals,
+    validate_candidate,
+    _validate_add_linkage,
+    _validate_add_targeted_point,
+    _validate_set_grid_parameters,
+    _validate_update_linkage,
+    _validate_update_narrative,
+    _validate_update_point_attributes,
+)
 
 
 def _proposal_context_dict() -> dict:
@@ -45,17 +65,6 @@ class TestProposalContextModels:
         payload["saqp"]["futureField"] = "x"
         parsed = ProposalContext.model_validate(payload)
         assert parsed.saqp.planId == "plan-1"
-
-
-import pytest
-
-from proposals import (
-    ProposalRejected,
-    extract_artifacts,
-    _validate_add_targeted_point,
-    _validate_set_grid_parameters,
-    _validate_update_point_attributes,
-)
 
 
 def _artifacts():
@@ -196,13 +205,6 @@ class TestUpdatePointAttributes:
             )
 
 
-from proposals import (
-    _validate_add_linkage,
-    _validate_update_linkage,
-    _validate_update_narrative,
-)
-
-
 class TestAddLinkage:
     def test_valid_payload(self):
         _, csm = _artifacts()
@@ -307,18 +309,6 @@ class TestUpdateNarrative:
         _, csm = _artifacts()
         with pytest.raises(ProposalRejected):
             _validate_update_narrative(payload, csm)
-
-
-import asyncio
-import json
-
-from proposals import (
-    MAX_PROPOSALS_PER_ANSWER,
-    build_proposals_prompt,
-    generate_proposals,
-    parse_llm_proposals,
-    validate_candidate,
-)
 
 
 def _grid_candidate(**overrides) -> dict:
