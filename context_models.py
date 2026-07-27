@@ -239,6 +239,61 @@ class SaqpContext(BaseModel):
     relocatedPoints: Optional[int] = None
 
 
+class ProposalEntityRef(BaseModel):
+    """A stable app id plus a short human label, so the proposal model can
+    pick real targets. Ids are opaque; labels are display-only."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: Optional[str] = None
+    label: Optional[str] = None
+
+
+class ProposalLinkageRef(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: Optional[str] = None
+    label: Optional[str] = None
+    # "generated" | "consultant" — consultant-authored linkages are rejected
+    # at apply time in the app, so the prompt steers away from them.
+    origin: Optional[str] = None
+
+
+class ProposalSaqpContext(BaseModel):
+    """SAQP artifact identity + editable targets for edit proposals
+    (contract: docs/ops/proposal-context-contract.md)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    planId: Optional[str] = None
+    updatedAt: Optional[str] = None
+    points: Optional[List[ProposalEntityRef]] = None
+    samples: Optional[List[ProposalEntityRef]] = None
+
+
+class ProposalCsmContext(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: Optional[str] = None
+    updatedAt: Optional[str] = None
+    sources: Optional[List[ProposalEntityRef]] = None
+    pathways: Optional[List[ProposalEntityRef]] = None
+    receptors: Optional[List[ProposalEntityRef]] = None
+    linkages: Optional[List[ProposalLinkageRef]] = None
+    media: Optional[List[str]] = None
+
+
+class ProposalContext(BaseModel):
+    """Ids + artifact versions the frontend sends so /query can emit
+    apply-able edit proposals. Absent on old clients — proposals are then
+    never generated."""
+
+    model_config = ConfigDict(extra="allow")
+
+    saqp: Optional[ProposalSaqpContext] = None
+    csm: Optional[ProposalCsmContext] = None
+
+
 class BoreholeLithologyInterval(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -447,6 +502,7 @@ class WorkspaceContext(BaseModel):
     saqpContext: Optional[SaqpContext] = None
     fieldContext: Optional[FieldContext] = None
     csmContext: Optional[CsmContext] = None
+    proposalContext: Optional[ProposalContext] = None
     conversation: Optional[List[ConversationMessage]] = Field(
         default=None, max_length=MAX_CONVERSATION_MESSAGES
     )
