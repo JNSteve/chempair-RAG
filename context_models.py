@@ -439,6 +439,7 @@ class AnalyteColumnResult(BaseModel):
     sampleCode: Optional[str] = None
     depth: Optional[str] = None
     value: Optional[float | int | str] = None
+    isQc: Optional[bool] = None
 
 
 class AnalyteColumn(BaseModel):
@@ -794,7 +795,8 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             label = result.sampleCode
             if result.depth:
                 label += f" ({result.depth})"
-            rows.append(f"- {label}: {result.value}{unit}")
+            qc_tag = " [QC/duplicate]" if result.isQc else ""
+            rows.append(f"- {label}: {result.value}{unit}{qc_tag}")
         if not rows:
             continue
         total = column.totalResults if column.totalResults is not None else len(rows)

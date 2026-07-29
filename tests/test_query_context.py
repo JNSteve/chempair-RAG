@@ -1585,6 +1585,34 @@ class TestBuildGroundingPrompt:
         assert "- QA02: 5.8 mg/kg" in prompt
         assert "(complete listing — every reported result for this analyte)" in prompt
 
+    def test_qc_results_are_tagged_in_the_analyte_column(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext.model_validate(
+                {
+                    "projectState": {
+                        "analyteColumns": [
+                            {
+                                "analyte": "Lead",
+                                "unit": "mg/kg",
+                                "totalResults": 2,
+                                "results": [
+                                    {"sampleCode": "BH01", "value": 12},
+                                    {
+                                        "sampleCode": "BH01_DUP",
+                                        "value": 14,
+                                        "isQc": True,
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        assert "- BH01: 12 mg/kg" in prompt
+        assert "- BH01_DUP: 14 mg/kg [QC/duplicate]" in prompt
+
     def test_truncated_analyte_column_carries_truncation_note(self):
         prompt = build_grounding_prompt(
             WorkspaceContext.model_validate(
