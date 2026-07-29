@@ -433,6 +433,29 @@ class UclEntry(BaseModel):
     reliabilityWarning: Optional[str] = None
 
 
+class AnalyteColumnResult(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sampleCode: Optional[str] = None
+    depth: Optional[str] = None
+    value: Optional[float | int | str] = None
+
+
+class AnalyteColumn(BaseModel):
+    """Every reported result for one analyte across the project. Unlike
+    projectResults (a relevance-selected subset), this listing is complete
+    for its analyte and may be enumerated as such."""
+
+    model_config = ConfigDict(extra="allow")
+
+    analyte: Optional[str] = None
+    unit: Optional[str] = None
+    criterionValue: Optional[float] = None
+    results: Optional[List[AnalyteColumnResult]] = None
+    totalResults: Optional[int] = None
+    truncated: Optional[bool] = None
+
+
 class ProjectState(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -448,6 +471,7 @@ class ProjectState(BaseModel):
     detectionStats: Optional[List[DetectionStat]] = None
     qaqc: Optional[QaQcSummary] = None
     samplingProgram: Optional[SamplingProgram] = None
+    analyteColumns: Optional[List[AnalyteColumn]] = None
 
 
 class ProjectEvidenceSummary(BaseModel):
@@ -758,6 +782,33 @@ def build_grounding_prompt(ctx: WorkspaceContext) -> str:
             rows.append(line)
         if rows:
             sections.append("## UCL95 Statistics\n" + "\n".join(rows))
+
+    for column in (project_state.analyteColumns or []) if project_state else []:
+        if not column.analyte or not column.results:
+            continue
+        unit = f" {column.unit}" if column.unit else ""
+        rows = []
+        for result in column.results:
+            if result.sampleCode is None or result.value is None:
+                continue
+            label = result.sampleCode
+            if result.depth:
+                label += f" ({result.depth})"
+            rows.append(f"- {label}: {result.value}{unit}")
+        if not rows:
+            continue
+        total = column.totalResults if column.totalResults is not None else len(rows)
+        header = f"## Complete {column.analyte} Results ({total} samples with results)"
+        if column.criterionValue is not None:
+            rows.insert(0, f"Criterion: {column.criterionValue:g}{unit}")
+        if column.truncated:
+            rows.append(
+                f"(showing the first {len([r for r in rows if r.startswith('- ')])} "
+                f"of {total} results — list truncated)"
+            )
+        else:
+            rows.append("(complete listing — every reported result for this analyte)")
+        sections.append(header + "\n" + "\n".join(rows))
 
     if project_state and project_state.criteriaCoverage:
         c = project_state.criteriaCoverage
