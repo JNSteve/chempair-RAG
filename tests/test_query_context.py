@@ -1547,6 +1547,69 @@ class TestBuildGroundingPrompt:
         assert "below criterion 300" in prompt
         assert "[caution: n < 8]" in prompt
 
+    def test_complete_analyte_column_renders_with_completeness_note(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext.model_validate(
+                {
+                    "projectState": {
+                        "analyteColumns": [
+                            {
+                                "analyte": "Benzo(a)pyrene",
+                                "unit": "mg/kg",
+                                "criterionValue": 3,
+                                "totalResults": 3,
+                                "results": [
+                                    {
+                                        "sampleCode": "BH23",
+                                        "depth": "0.1",
+                                        "value": 7.4,
+                                    },
+                                    {
+                                        "sampleCode": "TP01",
+                                        "depth": "0.4",
+                                        "value": "<0.05",
+                                    },
+                                    {"sampleCode": "QA02", "value": 5.8},
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        assert "## Complete Benzo(a)pyrene Results (3 samples with results)" in prompt
+        assert "Criterion: 3 mg/kg" in prompt
+        assert "- BH23 (0.1): 7.4 mg/kg" in prompt
+        assert "- TP01 (0.4): <0.05 mg/kg" in prompt
+        assert "- QA02: 5.8 mg/kg" in prompt
+        assert "(complete listing — every reported result for this analyte)" in prompt
+
+    def test_truncated_analyte_column_carries_truncation_note(self):
+        prompt = build_grounding_prompt(
+            WorkspaceContext.model_validate(
+                {
+                    "projectState": {
+                        "analyteColumns": [
+                            {
+                                "analyte": "Lead",
+                                "totalResults": 250,
+                                "truncated": True,
+                                "results": [
+                                    {"sampleCode": "BH01", "value": 12},
+                                    {"sampleCode": "BH02", "value": 15},
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        assert "## Complete Lead Results (250 samples with results)" in prompt
+        assert "of 250 results — list truncated" in prompt
+        assert "(complete listing" not in prompt
+
     def test_context_v6_analysis_blocks_render(self):
         prompt = build_grounding_prompt(
             WorkspaceContext.model_validate(
